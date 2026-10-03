@@ -91,6 +91,9 @@ tr.detailRow td{background:var(--softer);border-bottom:2px solid var(--line);pad
 .svc{display:flex;flex-wrap:wrap;gap:6px 18px;font-size:12px;color:var(--muted);border-top:1px dashed var(--line);padding-top:10px;margin-top:4px}
 .svc b{color:var(--ink);font-weight:600;word-break:break-all}
 .draftEq{margin-top:6px}
+.dupLine{font-size:12px;color:var(--muted);margin-top:8px;line-height:1.7}
+.dupLine b{color:var(--ink)}
+.dupLine a{word-break:break-all}
 footer{margin-top:18px;border-top:1px solid var(--line);padding-top:12px}
 .mt0{margin-top:0}
 </style>
@@ -116,6 +119,7 @@ footer{margin-top:18px;border-top:1px solid var(--line);padding-top:12px}
         <option value="error">Ошибки загрузки</option>
         <option value="unchecked">Ещё не проверенные</option>
         <option value="draftdiff">Черновик ≠ сайт</option>
+        <option value="dups">С дублями (title / description)</option>
       </select>
       <label class="check" title="Игнорировать регистр, знаки препинания и лишние пробелы при сравнении">
         <input type="checkbox" id="softCmp" checked> мягкое сравнение
@@ -175,7 +179,7 @@ footer{margin-top:18px;border-top:1px solid var(--line);padding-top:12px}
   </div>
 
   <footer>
-    <p class="note mt0">«Сайт сейчас» — страница загружается через публичные CORS-прокси (allorigins → corsproxy.io → codetabs → cors.eu.org → r.jina.ai), поэтому HTTP-код ответа прокси не показывает: статус определяется по содержимому. «? 404» — Drupal на несуществующем адресе отдаёт главную страницу (title/каноническая главной): инструмент помечает такие случаи. Сравнение «мягкое» игнорирует регистр, пунктуацию и лишние пробелы; выключите галочку, чтобы сравнивать посимвольно. Черновики и live-результаты хранятся в localStorage браузера и никуда не отправляются.</p>
+    <p class="note mt0">«Сайт сейчас» — страница загружается через публичные CORS-прокси (allorigins → corsproxy.io → codetabs → cors.eu.org → r.jina.ai), поэтому HTTP-код ответа прокси не показывает: статус определяется по содержимому. «? 404» — Drupal на несуществующем адресе отдаёт главную страницу (title/каноническая главной): инструмент помечает такие случаи. Сравнение «мягкое» игнорирует регистр, пунктуацию и лишние пробелы; выключите галочку, чтобы сравнивать посимвольно. Списки дублей строятся по страницам, загруженным в инструмент (значение из базы, а без базы — живое); число в колонках «Дуб.» — из отчёта. Черновики и live-результаты хранятся в localStorage браузера и никуда не отправляются.</p>
     <p class="note">Источник отчёта: выгрузка аудита Топвизор, встроена в файл при сборке. Заменить — блок «Данные отчёта» выше.</p>
     <p class="note"><a href="https://github.com/Mmitekk/drupal-meta-check">github.com/Mmitekk/drupal-meta-check</a> · живая версия: <a href="https://mmitekk.github.io/drupal-meta-check/">mmitekk.github.io/drupal-meta-check</a></p>
   </footer>
@@ -405,7 +409,7 @@ async function checkRow(row){
 async function checkAll(){
   if(state.running){ state.abort = true; return; }
   state.running = true; state.abort = false; state.lastDone = 0;
-  const btn = $('#btnCheck'); btn.textContent = '■&nbsp; Стоп';
+  const btn = $('#btnCheck'); btn.innerHTML = '■&nbsp; Стоп';
   const todo = filteredRows();
   await mapPool(todo, 4, async (row) => {
     if(state.abort) return;
@@ -436,6 +440,10 @@ function filteredRows(){
       case 'error':     return st === 'error';
       case 'unchecked': return st === 'unchecked';
       case 'draftdiff': return draftStatus(r,'title') === 'differ' || draftStatus(r,'description') === 'differ';
+      case 'dups': {
+        const dt = dupGroupFor(r,'title'), dd = dupGroupFor(r,'description');
+        return dt.length > 1 || dd.length > 1;
+      }
       default: return true;
     }
   });
@@ -477,6 +485,32 @@ function counterHtml(text, lo, hi){
   const bad = n > 0 && (n < lo || n > hi);
   return '<span class="counter">' + n + ' симв.' + (bad ? ' <span class="warnMark" title="вне рекомендуемого диапазона ' + lo + '–' + hi + '">!</span>' : '') + '</span>';
 }
+/* дубли: группы страниц с одинаковым значением (по базе, а без базы — по живому) */
+function pluralPages(n){ const m10 = n % 10, m100 = n % 100; if(m10 === 1 && m100 !== 11) return 'страница'; if(m10 >= 2 && m10 <= 4 && (m100 < 12 || m100 > 14)) return 'страницы'; return 'страниц'; }
+function dupGroups(field){
+  const map = new Map();
+  for(const r of state.rows){
+    const key = cmpVal(r[field]) || (r.live && !r.live.error ? cmpVal(r.live[field]) : '');
+    if(!key) continue;
+    if(!map.has(key)) map.set(key, []);
+    map.get(key).push(r);
+  }
+  return map;
+}
+function dupGroupFor(row, field){
+  const key = cmpVal(row[field]) || (row.live && !row.live.error ? cmpVal(row.live[field]) : '');
+  if(!key) return [];
+  return dupGroups(field).get(key) || [];
+}
+function dupLine(row, field){
+  const others = dupGroupFor(row, field).filter(r => r !== row);
+  if(!others.length) return '';
+  const shown = others.slice(0, 12);
+  const rest = others.length - shown.length;
+  return '<div class="dupLine"><b>' + others.length + '</b> ' + pluralPages(others.length) + ' с тем же значением: '
+    + shown.map(o => '<a href="' + esc(o.url) + '" target="_blank" rel="noopener">' + esc(o.url.replace(/^https?:\/\//,'')) + '</a>').join(' · ')
+    + (rest > 0 ? ' <b>+' + rest + '</b>' : '') + '</div>';
+}
 function detailHtml(row){
   const baseLbl = state.source === 'custom' ? 'в снимке' : 'в отчёте';
   const fromBtn = state.source === 'custom' ? '← из снимка' : '← из отчёта';
@@ -487,7 +521,7 @@ function detailHtml(row){
     '<div class="cols c2">' +
       '<div class="cellbox"><div class="lbl">' + baseLbl + '</div><div class="val">' + (row.h1 ? esc(row.h1) : '<span class="val empty">пусто</span>') + '</div></div>' +
       '<div class="cellbox"><div class="lbl">на сайте сейчас</div><div class="val">' + (row.live && row.live.h1 ? esc(row.live.h1) : (row.live && row.live.error ? '<span class="val empty">не загружено</span>' : '<span class="val empty">нет данных</span>')) + '</div></div>' +
-    '</div></div>';
+    '</div>' + dupLine(row,'h1') + '</div>';
   const metaBlk = (field, label, st, dst2) => {
     const rep = row[field];
     const lv = row.live && !row.live.error ? row.live[field] : '';
@@ -505,7 +539,7 @@ function detailHtml(row){
         '</div>' +
         '<div class="draftEq">' + (dst2 === 'none' ? '' : dst2 === 'pending' ? '<span class="chip chip-none">черновик ещё не сверен</span>' : dst2 === 'match' ? '<span class="chip chip-match">черновик = сайт</span>' : '<span class="chip chip-differ">черновик ≠ сайт</span>') + '</div>' +
       '</div>' +
-    '</div></div>';
+    '</div>' + dupLine(row, field) + '</div>';
   };
   const svc =
     '<div class="svc">' +
