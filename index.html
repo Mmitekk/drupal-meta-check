@@ -179,7 +179,7 @@ footer{margin-top:18px;border-top:1px solid var(--line);padding-top:12px}
   </div>
 
   <footer>
-    <p class="note mt0">«Сайт сейчас» — страница загружается через публичные CORS-прокси (allorigins → corsproxy.io → codetabs → cors.eu.org → r.jina.ai), поэтому HTTP-код ответа прокси не показывает: статус определяется по содержимому. «? 404» — Drupal на несуществующем адресе отдаёт главную страницу (title/каноническая главной): инструмент помечает такие случаи. Сравнение «мягкое» игнорирует регистр, пунктуацию и лишние пробелы; выключите галочку, чтобы сравнивать посимвольно. Списки дублей строятся по страницам, загруженным в инструмент (значение из базы, а без базы — живое); число в колонках «Дуб.» — из отчёта. Черновики и live-результаты хранятся в localStorage браузера и никуда не отправляются.</p>
+    <p class="note mt0">«Сайт сейчас» — страница загружается через публичные CORS-прокси (allorigins → corsproxy.io → codetabs → cors.eu.org → r.jina.ai), поэтому HTTP-код ответа прокси не показывает: статус определяется по содержимому. «? 404» — Drupal на несуществующем адресе отдаёт главную страницу (title/каноническая главной): инструмент помечает такие случаи. Сравнение «мягкое» игнорирует регистр, пунктуацию и лишние пробелы; выключите галочку, чтобы сравнивать посимвольно. Списки дублей строятся по страницам, загруженным в инструмент (значение из базы, а без базы — живое) и показывают группу целиком, как попап дублей в Топвизоре: текущая страница помечена «эта страница», поэтому число в списке совпадает с колонкой «Дуб.» из отчёта. Черновики и live-результаты хранятся в localStorage браузера и никуда не отправляются.</p>
     <p class="note">Источник отчёта: выгрузка аудита Топвизор, встроена в файл при сборке. Заменить — блок «Данные отчёта» выше.</p>
     <p class="note"><a href="https://github.com/Mmitekk/drupal-meta-check">github.com/Mmitekk/drupal-meta-check</a> · живая версия: <a href="https://mmitekk.github.io/drupal-meta-check/">mmitekk.github.io/drupal-meta-check</a></p>
   </footer>
@@ -503,12 +503,15 @@ function dupGroupFor(row, field){
   return dupGroups(field).get(key) || [];
 }
 function dupLine(row, field){
-  const others = dupGroupFor(row, field).filter(r => r !== row);
-  if(!others.length) return '';
-  const shown = others.slice(0, 12);
-  const rest = others.length - shown.length;
-  return '<div class="dupLine"><b>' + others.length + '</b> ' + pluralPages(others.length) + ' с тем же значением: '
-    + shown.map(o => '<a href="' + esc(o.url) + '" target="_blank" rel="noopener">' + esc(o.url.replace(/^https?:\/\//,'')) + '</a>').join(' · ')
+  const group = dupGroupFor(row, field);
+  if(group.length < 2) return '';
+  const shown = group.slice(0, 12);
+  const rest = group.length - shown.length;
+  return '<div class="dupLine"><b>' + group.length + '</b> ' + pluralPages(group.length) + ' с этим значением (включая эту): '
+    + shown.map(o => o === row
+        ? '<b title="' + esc(o.url) + '">' + esc(o.url.replace(/^https?:\/\//,'')) + ' — эта страница</b>'
+        : '<a href="' + esc(o.url) + '" target="_blank" rel="noopener">' + esc(o.url.replace(/^https?:\/\//,'')) + '</a>')
+      .join(' · ')
     + (rest > 0 ? ' <b>+' + rest + '</b>' : '') + '</div>';
 }
 function detailHtml(row){

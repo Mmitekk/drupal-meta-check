@@ -15,7 +15,7 @@ The audit table (URL, response code, language, H1, Title, Description, Title/Des
 ## Features
 
 - **Check live data** — fetches each page (through public CORS proxies, concurrency 4) and shows three status marks per row: H1 / Title / Description, each `=` (match) or `≠` (differs from the report).
-- **Duplicates** — next to the report's duplicate counters you get the actual partner URLs: expand a row to see every other page sharing the same title/description, and use the "with duplicates" filter to gather them all.
+- **Duplicates** — expand a row to see the whole duplicate group TopVisor-style: every page sharing the same H1/title/description, with the current page marked; the "with duplicates" filter gathers them all.
 - **Suspected 404 detection** — Drupal serves the homepage for missing URLs; the tool flags pages whose canonical points to the homepage or whose title says "Page not found".
 - **Drafts** — every row expands into an editor where you can type the new Title / Description, see the character count (with the recommended 40–70 / 120–180 range marker), and after deploying compare the draft against the live page. Drafts are kept in `localStorage`.
 - **Soft comparison** — ignores case, punctuation and extra whitespace by default; switch to strict character-level comparison with one checkbox.
