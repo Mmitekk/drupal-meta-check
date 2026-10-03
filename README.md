@@ -29,6 +29,16 @@ The audit table (URL, response code, language, H1, Title, Description, Title/Des
 
 No build step, no dependencies, no backend. Nothing is sent anywhere except the page fetches themselves; results and drafts stay in your browser.
 
+## Universal mode — check any site
+
+The embedded snapshot is just an example. To check your own site: open **Own check** under the toolbar, paste a `sitemap.xml` address (or just a list of URLs), and click **Create check**. Then:
+
+1. Let the live check finish — pages appear with the `○ no baseline` mark.
+2. Press **Pin baseline** — the fetched values become the comparison base.
+3. After editing pages on the site, click **Check live data** again — the rows show exactly what changed since the snapshot (`=` / `≠`).
+
+The current session (URL list, baseline, drafts, live results) is stored in the browser and survives page reloads; **Reset to embedded data** returns the built-in report.
+
 ## Updating the audit data
 
 Open **Report data** under the toolbar and paste a JSON array:

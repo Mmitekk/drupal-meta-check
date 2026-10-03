@@ -99,7 +99,7 @@ footer{margin-top:18px;border-top:1px solid var(--line);padding-top:12px}
 <div class="wrap">
 
   <h1>Drupal Meta Check</h1>
-  <p class="sub">Живые <b>title / description / H1</b> против данных аудита. Отчёт встроен в файл: <b id="dataCaption">—</b>. Кнопка сверху проверяет страницы сайта и подсвечивает, что изменилось с момента аудита. Черновики title/description можно вписать прямо в таблицу и сверить с сайтом после деплоя.</p>
+  <p class="sub">Живые <b>title / description / H1</b> против сохранённой базы сравнения — для любого сайта. Встроен отчёт: <b id="dataCaption">—</b>. Свой сайт или список ссылок — в блоке «Своя проверка» под панелью. Кнопка сверху проверяет страницы и подсвечивает, что изменилось; черновики title/description вписываются прямо в таблицу.</p>
 
   <div class="toolbar">
     <div class="trow">
@@ -120,10 +120,28 @@ footer{margin-top:18px;border-top:1px solid var(--line);padding-top:12px}
       <label class="check" title="Игнорировать регистр, знаки препинания и лишние пробелы при сравнении">
         <input type="checkbox" id="softCmp" checked> мягкое сравнение
       </label>
+      <button class="btn ghost" id="btnSnapshot" title="Сделать текущие живые значения (title/description/H1) базой сравнения для всех проверенных страниц — дальше отличия будут считаться от этого снимка">◉ Зафиксировать базу</button>
       <button class="btn ghost" id="btnCsv">CSV</button>
       <button class="btn ghost" id="btnClearLive">Сбросить live</button>
       <button class="btn ghost" id="btnClearDrafts">Сбросить черновики</button>
     </div>
+    <details class="dataBox" id="customBox">
+      <summary>Своя проверка — вставить сайт или список ссылок</summary>
+      <div class="inner">
+        <div class="trow">
+          <input type="text" id="sitemapUrl" class="grow" placeholder="адрес sitemap.xml, например https://mysite.ru/sitemap.xml">
+          <button class="btn" id="btnSitemap">Загрузить sitemap</button>
+        </div>
+        <label style="display:block;font-size:12px;color:var(--muted);margin:10px 0 4px">…или вставьте список ссылок (по одной в строке или просто текстом — ссылки найдутся сами)</label>
+        <textarea id="customUrls" rows="5" placeholder="https://mysite.ru/&#10;https://mysite.ru/o-kompanii&#10;https://mysite.ru/uslugi"></textarea>
+        <div class="trow" style="margin-top:8px">
+          <button class="btn primary" id="btnCustomCreate">Создать проверку</button>
+          <button class="btn" id="btnCustomCreateCheck">Создать и сразу проверить</button>
+          <span class="note" id="customInfo"></span>
+        </div>
+        <p class="note" style="margin-bottom:0">Порядок работы: создайте проверку → дождитесь живой проверки → нажмите «◉ Зафиксировать базу», чтобы текущие значения стали базой сравнения. Дальше после любых правок на сайте жмите «Проверить актуальные данные» — увидите отличия от зафиксированного снимка. Список, снимок и черновики хранятся в этом браузере.</p>
+      </div>
+    </details>
     <details class="dataBox">
       <summary>Данные отчёта (заменить / вернуть встроенные)</summary>
       <div class="inner">
@@ -181,6 +199,8 @@ const state = {
   soft: LS.get('dmc_v1_soft', true),
   via: '',
   lastDone: 0,
+  source: 'builtin',        // builtin | import | custom
+  snapshotTs: null,
 };
 const $ = s => document.querySelector(s);
 
@@ -265,6 +285,47 @@ function parseLive(html, pageUrl){
   return out;
 }
 
+/* ================= свой сайт: sitemap и списки ссылок ================= */
+function extractUrls(text){
+  const out = [], seen = new Set();
+  for(const m of String(text).matchAll(/https?:\/\/[^\s"'<>|)\]}]+/gi)){
+    const u = m[0].replace(/[.,;:]+$/,'');
+    if(!seen.has(u)){ seen.add(u); out.push(u); }
+  }
+  return out;
+}
+function parseSitemapXml(text){
+  let doc;
+  try{ doc = new DOMParser().parseFromString(text, 'text/xml'); }catch(e){ return null; }
+  if(doc.querySelector('parsererror')) return null;
+  const locs = Array.from(doc.getElementsByTagName('loc')).map(l => (l.textContent || '').trim()).filter(Boolean);
+  return { isIndex: /sitemapindex/i.test((doc.documentElement || {}).nodeName || ''), locs };
+}
+async function loadSitemapUrls(sUrl){
+  const grab = async (u) => {
+    const r = await fetchRaw(u, {timeout: 40000});
+    const parsed = parseSitemapXml(r.text);
+    if(parsed) return parsed;
+    // прокси мог отдать не XML — вытаскиваем ссылки того же хоста
+    let host = ''; try{ host = new URL(u).hostname.replace(/^www\./,''); }catch(e){}
+    return { isIndex:false, locs: extractUrls(r.text).filter(x => { try{ return new URL(x).hostname.replace(/^www\./,'') === host; }catch(e){ return false; } }) };
+  };
+  const first = await grab(sUrl);
+  let all = [];
+  if(first.isIndex){
+    const parts = [];
+    await mapPool(first.locs.slice(0, 30), 3, async (child) => {
+      try{ const c = await grab(child); parts.push(...c.locs); }catch(e){}
+    });
+    all = parts;
+  }else{
+    all = first.locs;
+  }
+  const self = sUrl.replace(/\/+$/,'');
+  all = all.filter(u => u.replace(/\/+$/,'') !== self);
+  return [...new Set(all)].sort();
+}
+
 /* ================= статусы ================= */
 // статусы полей: match | differ | none | error
 function fieldStatus(row, field){
@@ -272,6 +333,7 @@ function fieldStatus(row, field){
   if(row.live.error) return 'error';
   const liveVal = field === 'h1' ? row.live.h1 : row.live[field];
   if(!cmpVal(liveVal)) return 'none';
+  if(!cmpVal(row[field])) return 'nobase';
   return cmpVal(row[field]) === cmpVal(liveVal) ? 'match' : 'differ';
 }
 function draftStatus(row, field){
@@ -292,6 +354,7 @@ const CHIP = {
   match:  '<span class="chip chip-match">= совпадает</span>',
   differ: '<span class="chip chip-differ">≠ отличается</span>',
   none:   '<span class="chip chip-none">— нет данных</span>',
+  nobase: '<span class="chip chip-none">○ нет базы</span>',
   error:  '<span class="chip chip-error">× ошибка</span>',
   warn:   '<span class="chip chip-warn">? 404</span>',
   pending:'<span class="chip chip-none">… ждёт проверки</span>',
@@ -300,9 +363,10 @@ const MINI = {
   match:  '<span class="chip chip-match mini" title="совпадает">=</span>',
   differ: '<span class="chip chip-differ mini" title="отличается">≠</span>',
   none:   '<span class="chip chip-none mini" title="нет данных">—</span>',
+  nobase: '<span class="chip chip-none mini" title="нет базы сравнения — проверьте страницу и нажмите «Зафиксировать базу»">○</span>',
   error:  '<span class="chip chip-error mini" title="ошибка">×</span>',
 };
-const MINI_TEXT = { match:'совпадает', differ:'отличается', none:'нет данных', error:'ошибка загрузки' };
+const MINI_TEXT = { match:'совпадает', differ:'отличается', none:'нет данных', nobase:'нет базы сравнения', error:'ошибка загрузки' };
 function liveCell(row){
   if(!row.live) return '<span class="chip chip-none">— не проверено</span>';
   if(row.live.error) return CHIP.error;
@@ -389,6 +453,7 @@ function counts(){
 function statHtml(){
   const c = counts();
   const checked = state.rows.length - c.unchecked;
+  const noBase = state.rows.some(r => r.live && !r.live.error && ['h1','title','description'].some(f => fieldStatus(r,f) === 'nobase'));
   return 'Страниц: <b>' + state.rows.length + '</b>'
     + ' · проверено: <b>' + checked + '</b>'
     + ' · ' + MINI.match + ' <b>' + c.match + '</b>'
@@ -396,6 +461,7 @@ function statHtml(){
     + ' · ' + MINI.error + ' <b>' + c.error + '</b>'
     + ' · не проверено: <b>' + c.unchecked + '</b>'
     + ' · черновики: <b>' + c.draft + '</b>'
+    + (noBase ? ' · <b>база пуста</b> — проверьте страницы и нажмите «◉ Зафиксировать базу»' : '')
     + (state.lastDone && Object.values(LS.get('dmc_v1_live', {})).some(l => l && l.ts) ? ' · live от ' + fmtTs(Math.max(...state.rows.filter(r=>r.live&&r.live.ts).map(r=>r.live.ts))) : '');
 }
 function summaryCell(row){
@@ -412,12 +478,14 @@ function counterHtml(text, lo, hi){
   return '<span class="counter">' + n + ' симв.' + (bad ? ' <span class="warnMark" title="вне рекомендуемого диапазона ' + lo + '–' + hi + '">!</span>' : '') + '</span>';
 }
 function detailHtml(row){
+  const baseLbl = state.source === 'custom' ? 'в снимке' : 'в отчёте';
+  const fromBtn = state.source === 'custom' ? '← из снимка' : '← из отчёта';
   const h1st = fieldStatus(row,'h1'), tst = fieldStatus(row,'title'), dst = fieldStatus(row,'description');
   const dt = draftStatus(row,'title'), dd = draftStatus(row,'description');
   const h1blk =
     '<div class="blk"><div class="blk-h">H1 ' + (MINI[h1st] || '') + (row.live && row.live.h1Count > 1 ? ' <span class="chip chip-warn">H1 ×' + row.live.h1Count + ' на странице</span>' : '') + '</div>' +
     '<div class="cols c2">' +
-      '<div class="cellbox"><div class="lbl">в отчёте</div><div class="val">' + (row.h1 ? esc(row.h1) : '<span class="val empty">пусто</span>') + '</div></div>' +
+      '<div class="cellbox"><div class="lbl">' + baseLbl + '</div><div class="val">' + (row.h1 ? esc(row.h1) : '<span class="val empty">пусто</span>') + '</div></div>' +
       '<div class="cellbox"><div class="lbl">на сайте сейчас</div><div class="val">' + (row.live && row.live.h1 ? esc(row.live.h1) : (row.live && row.live.error ? '<span class="val empty">не загружено</span>' : '<span class="val empty">нет данных</span>')) + '</div></div>' +
     '</div></div>';
   const metaBlk = (field, label, st, dst2) => {
@@ -426,13 +494,13 @@ function detailHtml(row){
     const dv = norm(row.draft[field]);
     return '<div class="blk"><div class="blk-h">' + label + ' ' + (MINI[st] || '') + '</div>' +
     '<div class="cols c3">' +
-      '<div class="cellbox"><div class="lbl">в отчёте (' + norm(rep).length + ' симв.)</div><div class="val">' + (rep ? esc(rep) : '<span class="val empty">пусто</span>') + '</div></div>' +
+      '<div class="cellbox"><div class="lbl">' + baseLbl + ' (' + norm(rep).length + ' симв.)</div><div class="val">' + (rep ? esc(rep) : '<span class="val empty">пусто</span>') + '</div></div>' +
       '<div class="cellbox"><div class="lbl">на сайте сейчас</div><div class="val">' + (lv ? esc(lv) : '<span class="val empty">нет данных</span>') + '</div></div>' +
       '<div class="cellbox"><div class="lbl">черновик — правьте здесь</div>' +
         '<textarea data-draft="' + field + '" data-url="' + esc(row.url) + '" rows="3" placeholder="новый ' + label.toLowerCase() + '…">' + esc(dv) + '</textarea>' +
         counterHtml(dv, field === 'title' ? 40 : 120, field === 'title' ? 70 : 180) +
         '<div class="miniBtns">' +
-          '<button class="btn small ghost" data-act="draft-report" data-field="' + field + '" data-url="' + esc(row.url) + '">← из отчёта</button>' +
+          '<button class="btn small ghost" data-act="draft-report" data-field="' + field + '" data-url="' + esc(row.url) + '">' + fromBtn + '</button>' +
           '<button class="btn small ghost" data-act="draft-live" data-field="' + field + '" data-url="' + esc(row.url) + '">← с сайта</button>' +
         '</div>' +
         '<div class="draftEq">' + (dst2 === 'none' ? '' : dst2 === 'pending' ? '<span class="chip chip-none">черновик ещё не сверен</span>' : dst2 === 'match' ? '<span class="chip chip-match">черновик = сайт</span>' : '<span class="chip chip-differ">черновик ≠ сайт</span>') + '</div>' +
@@ -478,8 +546,17 @@ function render(){
   $('#dataCaption').textContent = dataCaption();
 }
 function dataCaption(){
-  const hosts = new Set(state.rows.map(r => { try{ return new URL(r.url).hostname; }catch(e){ return '?'; } }));
-  return [...hosts].join(', ') + ', ' + state.rows.length + ' страниц';
+  const hosts = [...new Set(state.rows.map(r => { try{ return new URL(r.url).hostname; }catch(e){ return '?'; } }))].join(', ');
+  let cap = hosts + ', ' + state.rows.length + ' страниц';
+  if(state.source === 'custom'){
+    cap += ' · своя проверка';
+    cap += state.snapshotTs ? ' · снимок от ' + fmtTs(state.snapshotTs) : ' · база ещё не зафиксирована';
+  }else if(state.source === 'import'){
+    cap += ' · импортированный отчёт';
+  }else{
+    cap += ' · встроенный отчёт';
+  }
+  return cap;
 }
 
 /* ================= CSV ================= */
@@ -542,6 +619,52 @@ function applyData(rows, note){
 /* ================= события ================= */
 $('#btnCheck').addEventListener('click', checkAll);
 $('#btnCsv').addEventListener('click', exportCsv);
+
+/* фиксация живых значений как базы сравнения */
+function rowToStored(r){
+  return { code:r.code, url:r.url, lang:r.lang, h1:r.h1, title:r.title, description:r.description, dupTitle:r.dupTitle, dupDescription:r.dupDescription, textLength:r.textLength };
+}
+$('#btnSnapshot').addEventListener('click', () => {
+  const targets = state.rows.filter(r => r.live && !r.live.error);
+  if(!targets.length){ alert('Сначала проверьте страницы — фиксировать нечего.'); return; }
+  if(!confirm('Сделать текущие живые значения (title/description/H1) базой сравнения для ' + targets.length + ' проверенных страниц?')) return;
+  for(const r of targets){
+    r.h1 = r.live.h1 || '';
+    r.title = r.live.title || '';
+    r.description = r.live.description || '';
+  }
+  state.source = 'custom';
+  state.snapshotTs = Date.now();
+  LS.set('dmc_v1_custom', { caption: dataCaption(), snapshotTs: state.snapshotTs, rows: state.rows.map(rowToStored) });
+  render();
+});
+
+/* своя проверка: sitemap или список ссылок */
+function startCustom(thenCheck){
+  const sUrl = $('#sitemapUrl').value.trim();
+  const list = extractUrls($('#customUrls').value);
+  const go = (urls) => {
+    if(!urls.length){ $('#customInfo').textContent = 'Не нашлось ни одного адреса'; return; }
+    if(urls.length > 500 && !confirm('Адресов ' + urls.length + ' — живая проверка через прокси займёт много времени. Создать список?')) return;
+    state.source = 'custom';
+    state.snapshotTs = null;
+    LS.del('dmc_v1_custom');
+    applyData(normalizeData(urls.map(u => ({ url: u }))));
+    $('#customBox').open = false;
+    $('#customInfo').textContent = 'Создано: ' + urls.length + ' страниц' + (thenCheck ? ', проверяем…' : '');
+    if(thenCheck) checkAll();
+  };
+  if(sUrl){
+    $('#customInfo').textContent = 'Загружаем sitemap…';
+    loadSitemapUrls(sUrl).then(go).catch(e => { $('#customInfo').textContent = 'Ошибка sitemap: ' + e.message; });
+  }else{
+    go(list);
+  }
+}
+$('#btnSitemap').addEventListener('click', () => startCustom(false));
+$('#btnCustomCreate').addEventListener('click', () => startCustom(false));
+$('#btnCustomCreateCheck').addEventListener('click', () => startCustom(true));
+
 $('#btnClearLive').addEventListener('click', () => {
   if(!confirm('Удалить все живые результаты проверки из этого браузера?')) return;
   LS.del('dmc_v1_live');
@@ -565,12 +688,17 @@ $('#btnImport').addEventListener('click', () => {
   if(!Array.isArray(arr)){ $('#importInfo').textContent = 'Нужен JSON-массив страниц'; return; }
   const rows = normalizeData(arr);
   if(!rows.length){ $('#importInfo').textContent = 'В массиве нет страниц с полем url'; return; }
+  state.source = 'import';
+  state.snapshotTs = null;
   LS.set('dmc_v1_data', rows);
+  LS.del('dmc_v1_custom');
   LS.del('dmc_v1_live');
   applyData(rows, 'Заменено: ' + rows.length + ' страниц (сохранено в этом браузере)');
 });
 $('#btnResetData').addEventListener('click', () => {
-  LS.del('dmc_v1_data'); LS.del('dmc_v1_live');
+  state.source = 'builtin';
+  state.snapshotTs = null;
+  LS.del('dmc_v1_data'); LS.del('dmc_v1_custom'); LS.del('dmc_v1_live');
   applyData(normalizeData(BUILTIN), 'Возвращены встроенные данные');
 });
 
@@ -622,8 +750,18 @@ tbody.addEventListener('input', (e) => {
 
 /* ================= старт ================= */
 $('#softCmp').checked = state.soft;
+const customSaved = LS.get('dmc_v1_custom', null);
 const stored = LS.get('dmc_v1_data', null);
-applyData(Array.isArray(stored) && stored.length ? stored : normalizeData(BUILTIN));
+if(customSaved && Array.isArray(customSaved.rows) && customSaved.rows.length){
+  state.source = 'custom';
+  state.snapshotTs = customSaved.snapshotTs || null;
+  applyData(normalizeData(customSaved.rows));
+}else if(Array.isArray(stored) && stored.length){
+  state.source = 'import';
+  applyData(normalizeData(stored));
+}else{
+  applyData(normalizeData(BUILTIN));
+}
 </script>
 </body>
 </html>
