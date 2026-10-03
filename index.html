@@ -1,0 +1,629 @@
+<!doctype html>
+<html lang="ru">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Drupal Meta Check — сверка title / description / H1 с аудитом</title>
+<style>
+:root{
+  --paper:#ffffff; --ink:#171717; --muted:#737373; --faint:#a3a3a3;
+  --line:#d4d4d4; --line-soft:#e5e5e5; --soft:#f5f5f5; --softer:#fafafa;
+}
+*{box-sizing:border-box}
+html,body{margin:0;padding:0}
+body{font:14px/1.5 system-ui,-apple-system,"Segoe UI",Roboto,Arial,sans-serif;background:var(--paper);color:var(--ink)}
+.wrap{max-width:1280px;margin:0 auto;padding:24px 20px 80px}
+a{color:var(--ink);text-decoration:underline;text-underline-offset:2px}
+a:hover{text-decoration-thickness:2px}
+h1{font-size:21px;margin:0 0 2px;letter-spacing:.2px}
+.sub{color:var(--muted);margin:0 0 18px;font-size:13px}
+.sub b{color:var(--ink)}
+
+/* ---------- toolbar ---------- */
+.toolbar{position:sticky;top:0;z-index:5;background:var(--paper);border-bottom:2px solid var(--ink);padding:12px 0 10px;margin-bottom:16px}
+.trow{display:flex;flex-wrap:wrap;gap:8px;align-items:center;margin-bottom:8px}
+.trow:last-child{margin-bottom:0}
+.btn{border:1px solid var(--ink);background:var(--paper);color:var(--ink);border-radius:8px;padding:7px 14px;font:inherit;font-size:13px;cursor:pointer;white-space:nowrap}
+.btn:hover{background:var(--ink);color:var(--paper)}
+.btn.primary{background:var(--ink);color:var(--paper);font-weight:600}
+.btn.primary:hover{background:#000}
+.btn.small{padding:3px 9px;font-size:12px;border-radius:6px}
+.btn:disabled{opacity:.4;cursor:not-allowed}
+.btn.ghost{border-color:var(--line);color:var(--muted)}
+.btn.ghost:hover{background:var(--soft);color:var(--ink)}
+input[type=text],select,textarea{border:1px solid var(--line);border-radius:8px;padding:7px 10px;font:inherit;font-size:13px;background:var(--paper);color:var(--ink)}
+input[type=text]:focus,select:focus,textarea:focus{outline:2px solid var(--ink);outline-offset:0}
+input[type=text].grow{flex:1 1 220px;min-width:160px}
+label.check{display:flex;align-items:center;gap:6px;font-size:13px;color:var(--muted);white-space:nowrap;cursor:pointer}
+label.check input{accent-color:#171717}
+#progress{font-size:12.5px;color:var(--muted)}
+.stats{display:flex;flex-wrap:wrap;gap:6px 14px;font-size:12.5px;color:var(--muted);margin-bottom:8px;align-items:center}
+.stats b{color:var(--ink)}
+details.dataBox{margin-top:8px;font-size:13px}
+details.dataBox summary{cursor:pointer;color:var(--muted);user-select:none}
+details.dataBox summary:hover{color:var(--ink)}
+details.dataBox .inner{border:1px solid var(--line);border-radius:10px;padding:12px;margin-top:8px;background:var(--softer)}
+textarea{width:100%;resize:vertical;font-family:ui-monospace,Consolas,monospace;font-size:12px}
+.note{font-size:12px;color:var(--muted)}
+
+/* ---------- chips (monochrome status marks) ---------- */
+.chip{display:inline-block;border:1px solid var(--line);border-radius:999px;padding:1px 9px;font-size:11.5px;line-height:1.6;white-space:nowrap;color:var(--muted);vertical-align:middle}
+.chip-match{background:var(--ink);border-color:var(--ink);color:var(--paper);font-weight:600}
+.chip-differ{background:var(--paper);border-color:var(--ink);color:var(--ink);border-width:2px;font-weight:700;padding:0 8px}
+.chip-error{background:var(--ink);border-color:var(--ink);color:var(--paper);border-style:double;border-width:3px;font-weight:700;padding:0 7px}
+.chip-warn{background:var(--soft);border-color:var(--faint);color:var(--ink);font-weight:600}
+.chip-none{background:transparent;border-style:dashed;color:var(--faint)}
+.chip.mini{padding:0 7px;font-size:10.5px;line-height:1.5}
+
+/* ---------- table ---------- */
+.tablebox{border:1px solid var(--line);border-radius:10px;overflow:auto;max-height:70vh}
+table{border-collapse:collapse;width:100%;font-size:13px}
+thead th{position:sticky;top:0;background:var(--soft);border-bottom:2px solid var(--ink);text-align:left;padding:8px 10px;font-weight:600;white-space:nowrap;z-index:2}
+tbody td{border-bottom:1px solid var(--line-soft);padding:6px 10px;vertical-align:top}
+tr.dataRow{cursor:pointer}
+tr.dataRow:hover{background:var(--softer)}
+tr.open{background:var(--soft)}
+td.num{color:var(--faint);white-space:nowrap;font-variant-numeric:tabular-nums}
+td.url a{word-break:break-all;text-decoration:none;border-bottom:1px solid var(--faint)}
+td.url a:hover{border-bottom-color:var(--ink)}
+td.c,.mono{font-variant-numeric:tabular-nums}
+td.toggle{width:26px;color:var(--muted);text-align:center}
+td.summary{white-space:nowrap}
+.sep{border-left:2px solid var(--ink);height:100%;min-height:20px}
+
+/* ---------- detail ---------- */
+tr.detailRow td{background:var(--softer);border-bottom:2px solid var(--line);padding:14px 16px}
+.blk{margin-bottom:14px}
+.blk:last-child{margin-bottom:0}
+.blk-h{display:flex;align-items:center;gap:8px;font-size:11px;text-transform:uppercase;letter-spacing:.8px;color:var(--muted);margin-bottom:6px;font-weight:700}
+.blk-h .chip{text-transform:none;letter-spacing:0}
+.cols{display:grid;gap:12px}
+.cols.c2{grid-template-columns:1fr 1fr}
+.cols.c3{grid-template-columns:1fr 1fr 1fr}
+@media (max-width:900px){.cols.c2,.cols.c3{grid-template-columns:1fr}}
+.cellbox{border:1px solid var(--line-soft);border-radius:8px;padding:8px 10px;background:var(--paper)}
+.lbl{font-size:11px;color:var(--muted);margin-bottom:4px;text-transform:uppercase;letter-spacing:.6px}
+.val{font-size:12.5px;white-space:pre-wrap;word-break:break-word}
+.val.empty{color:var(--faint);font-style:italic}
+.counter{font-size:11.5px;color:var(--muted);margin-top:4px;display:flex;gap:8px;align-items:center;flex-wrap:wrap}
+.counter .warnMark{font-weight:800;color:var(--ink);cursor:help}
+.miniBtns{display:flex;gap:6px;margin-top:6px;flex-wrap:wrap}
+.svc{display:flex;flex-wrap:wrap;gap:6px 18px;font-size:12px;color:var(--muted);border-top:1px dashed var(--line);padding-top:10px;margin-top:4px}
+.svc b{color:var(--ink);font-weight:600;word-break:break-all}
+.draftEq{margin-top:6px}
+footer{margin-top:18px;border-top:1px solid var(--line);padding-top:12px}
+.mt0{margin-top:0}
+</style>
+</head>
+<body>
+<div class="wrap">
+
+  <h1>Drupal Meta Check</h1>
+  <p class="sub">Живые <b>title / description / H1</b> против данных аудита. Отчёт встроен в файл: <b id="dataCaption">—</b>. Кнопка сверху проверяет страницы сайта и подсвечивает, что изменилось с момента аудита. Черновики title/description можно вписать прямо в таблицу и сверить с сайтом после деплоя.</p>
+
+  <div class="toolbar">
+    <div class="trow">
+      <button class="btn primary" id="btnCheck">⟳&nbsp; Проверить актуальные данные</button>
+      <span id="progress"></span>
+    </div>
+    <div class="stats" id="stats"></div>
+    <div class="trow">
+      <input type="text" id="search" class="grow" placeholder="фильтр по URL…">
+      <select id="statusFilter">
+        <option value="all">Все страницы</option>
+        <option value="changed">Есть отличия от отчёта</option>
+        <option value="match">Полностью совпадают</option>
+        <option value="error">Ошибки загрузки</option>
+        <option value="unchecked">Ещё не проверенные</option>
+        <option value="draftdiff">Черновик ≠ сайт</option>
+      </select>
+      <label class="check" title="Игнорировать регистр, знаки препинания и лишние пробелы при сравнении">
+        <input type="checkbox" id="softCmp" checked> мягкое сравнение
+      </label>
+      <button class="btn ghost" id="btnCsv">CSV</button>
+      <button class="btn ghost" id="btnClearLive">Сбросить live</button>
+      <button class="btn ghost" id="btnClearDrafts">Сбросить черновики</button>
+    </div>
+    <details class="dataBox">
+      <summary>Данные отчёта (заменить / вернуть встроенные)</summary>
+      <div class="inner">
+        <p class="note mt0">Вставьте JSON-массив страниц аудита (поля: <code>url</code>, <code>title</code>, <code>description</code>, <code>h1</code>, <code>code</code>, <code>dupTitle</code>, <code>dupDescription</code>, <code>textLength</code> — обязательна минимум <code>url</code>) и нажмите «Заменить». Данные сохранятся в этом браузере; черновики по совпадающим URL сохранятся.</p>
+        <textarea id="importArea" rows="6" placeholder='[{"url":"https://example.com/","title":"…","description":"…","h1":"…"}]'></textarea>
+        <div class="trow" style="margin-top:8px">
+          <button class="btn" id="btnImport">Заменить данные отчёта</button>
+          <button class="btn ghost" id="btnResetData">Вернуть встроенные данные</button>
+          <span class="note" id="importInfo"></span>
+        </div>
+      </div>
+    </details>
+  </div>
+
+  <div class="tablebox">
+    <table>
+      <thead><tr>
+        <th>#</th>
+        <th>URL</th>
+        <th>Код</th>
+        <th title="Язык страницы">Яз.</th>
+        <th title="Дубликатов Title">Дуб. T</th>
+        <th title="Дубликатов Description">Дуб. D</th>
+        <th title="Длина текста, символов">Текст</th>
+        <th style="border-left:2px solid var(--ink)">Сайт сейчас</th>
+        <th>Сверка H1 / T / D</th>
+        <th></th>
+      </tr></thead>
+      <tbody id="tbody"></tbody>
+    </table>
+  </div>
+
+  <footer>
+    <p class="note mt0">«Сайт сейчас» — страница загружается через публичные CORS-прокси (allorigins → corsproxy.io → codetabs → cors.eu.org → r.jina.ai), поэтому HTTP-код ответа прокси не показывает: статус определяется по содержимому. «? 404» — Drupal на несуществующем адресе отдаёт главную страницу (title/каноническая главной): инструмент помечает такие случаи. Сравнение «мягкое» игнорирует регистр, пунктуацию и лишние пробелы; выключите галочку, чтобы сравнивать посимвольно. Черновики и live-результаты хранятся в localStorage браузера и никуда не отправляются.</p>
+    <p class="note">Источник отчёта: выгрузка аудита Топвизор, встроена в файл при сборке. Заменить — блок «Данные отчёта» выше.</p>
+    <p class="note"><a href="https://github.com/Mmitekk/drupal-meta-check">github.com/Mmitekk/drupal-meta-check</a> · живая версия: <a href="https://mmitekk.github.io/drupal-meta-check/">mmitekk.github.io/drupal-meta-check</a></p>
+  </footer>
+</div>
+
+<script type="application/json" id="report-data">[{"code":"200","description":"АТМОС производит инновационную медицинскую технику. Гинекология, Аспирационные системы, Лор. История компании ATMOS. Сервис. Новости. Контакты. Сайт в Москве","dupDescription":"0","dupTitle":"0","h1":"Медицинское оборудование из ГЕРМАНИИ для оториноларингологии\n гинекологии и хирургии (аспирационные системы) – БЕЗОПАСНО И НАДЁЖНО","lang":"ru","textLength":"6930","title":"Представительство компании АТМОС в России. Официальный сайт ATMOS MedizinTechnik в Москве","url":"https://www.atmos-med.ru/"},{"code":"200","description":"Портативные аспираторы ATMOS для верхних дыхательных путей (ВДП) купить Москве по выгодной цене. Доставка по России. Компактные модели — немецкое качество для ЛОР-кабинетов и стационаров.","dupDescription":"0","dupTitle":"0","h1":"Аспираторы для верхних дыхательных путей","lang":"ru","textLength":"3871","title":"Аспираторы для верхних дыхательных путей | ATMOS MedizinTechnik в Москве","url":"https://www.atmos-med.ru/aspiratory-dlya-verhnih-dyhatelnyh-putey/dlya-sanacii"},{"code":"200","description":"АТМОС производит инновационную медицинскую технику. Гинекология, Аспирационные системы, Лор. История компании ATMOS. Сервис. Новости. Контакты. Сайт в Екатеринбурге","dupDescription":"0","dupTitle":"0","h1":"Медицинское оборудование из ГЕРМАНИИ для оториноларингологии\n гинекологии и хирургии (аспирационные системы) – БЕЗОПАСНО И НАДЁЖНО","lang":"ru","textLength":"6930","title":"Представительство компании АТМОС в России. Официальный сайт ATMOS MedizinTechnik в Екатеринбурге","url":"https://www.atmos-med.ru/ekaterinburg/"},{"code":"200","description":"Гинекологические кресла | ATMOS MedizinTechnik в Москве","dupDescription":"0","dupTitle":"0","h1":"Гинекологические кресла","lang":"ru","textLength":"6697","title":"Гинекологические кресла | ATMOS MedizinTechnik в Москве","url":"https://www.atmos-med.ru/ginekologicheskoe-oborudovanie/ginekologicheskoe-kreslo-atmos-chair-41-gyne"},{"code":"200","description":"Хирургический аспиратор ATMOS S 351 | ATMOS MedizinTechnik в Москве","dupDescription":"0","dupTitle":"0","h1":"Хирургический аспиратор ATMOS S 351","lang":"ru","textLength":"7606","title":"Хирургический аспиратор ATMOS S 351 | ATMOS MedizinTechnik в Москве","url":"https://www.atmos-med.ru/hirurgicheskie-aspiratory-kupit-v-gorode/atmos-s-351-kupit-v-gorode"},{"code":"200","description":"АТМОС производит инновационную медицинскую технику. Гинекология, Аспирационные системы, Лор. История компании ATMOS. Сервис. Новости. Контакты. Сайт в Краснодаре","dupDescription":"0","dupTitle":"0","h1":"Медицинское оборудование из ГЕРМАНИИ для оториноларингологии\n гинекологии и хирургии (аспирационные системы) – БЕЗОПАСНО И НАДЁЖНО","lang":"ru","textLength":"6930","title":"Представительство компании АТМОС в России. Официальный сайт ATMOS MedizinTechnik в Краснодаре","url":"https://www.atmos-med.ru/krasnodar/"},{"code":"200","description":"Налобные лампы | ATMOS MedizinTechnik в Москве","dupDescription":"0","dupTitle":"0","h1":"Налобные лампы","lang":"ru","textLength":"5412","title":"Налобные лампы | ATMOS MedizinTechnik в Москве","url":"https://www.atmos-med.ru/nalobnye-lampy/atmosr-hl21-led"},{"code":"200","description":"DDS-фильтры АТМОС препятствуют контаминации коронавируса (подтверждено тестами независимой лаборатории «Nelson Laboratories») | ATMOS MedizinTechnik в Москве","dupDescription":"0","dupTitle":"0","h1":"DDS-фильтры АТМОС препятствуют контаминации коронавируса (подтверждено тестами независимой лаборатории «Nelson Laboratories»)","lang":"ru","textLength":"5904","title":"DDS-фильтры АТМОС препятствуют контаминации коронавируса (подтверждено тестами независимой лаборатории «Nelson Laboratories») | ATMOS MedizinTechnik в Москве","url":"https://www.atmos-med.ru/news/dds-filtry-atmos-prepyatstvuyut-kontaminacii-koronavirusa-podtverzhdeno-testami-nezavisimoy"},{"code":"200","description":"АТМОС производит инновационную медицинскую технику. Гинекология, Аспирационные системы, Лор. История компании ATMOS. Сервис. Новости. Контакты. Сайт в Нижнем Новгороде","dupDescription":"0","dupTitle":"0","h1":"Медицинское оборудование из ГЕРМАНИИ для оториноларингологии\n гинекологии и хирургии (аспирационные системы) – БЕЗОПАСНО И НАДЁЖНО","lang":"ru","textLength":"6930","title":"Представительство компании АТМОС в России. Официальный сайт ATMOS MedizinTechnik в Нижнем Новгороде","url":"https://www.atmos-med.ru/nizhnij-novgorod/"},{"code":"200","description":"О компании АТМОС - Официальный представитель ATMOS MedizinTechnik в России | ATMOS MedizinTechnik в Нижнем Новгороде","dupDescription":"0","dupTitle":"0","h1":"О компании АТМОС - Официальный представитель ATMOS MedizinTechnik в России","lang":"ru","textLength":"7372","title":"О компании АТМОС - Официальный представитель ATMOS MedizinTechnik в России | ATMOS MedizinTechnik в Нижнем Новгороде","url":"https://www.atmos-med.ru/nizhnij-novgorod/about_us"},{"code":"200","description":"Выставки Атмос MedizinTechnik в России: отчеты о ключевых событиях 2025–2026, мастер-классы по микро-эндоскопической хирургии уха в НКЦО ФМБА. Анонсы будущих выставок.","dupDescription":"2","dupTitle":"0","h1":"Выставки","lang":"ru","textLength":"8731","title":"Выставки | ATMOS MedizinTechnik в Нижнем Новгороде","url":"https://www.atmos-med.ru/nizhnij-novgorod/about_us/exhibitions"},{"code":"200","description":"ATMOS MedizinTechnik. История развития бренда ATMOS. Узнайте подробнее о достижениях и развитии компании.","dupDescription":"2","dupTitle":"0","h1":"История","lang":"ru","textLength":"5763","title":"История | ATMOS MedizinTechnik в Нижнем Новгороде","url":"https://www.atmos-med.ru/nizhnij-novgorod/about_us/history"},{"code":"200","description":"Качество ATMOS MedizinTechnik — залог надежности немецкого медоборудования для ЛОР, хирургии и гинекологии с 1904 года. Сертифицированные системы DDS, H.A.S.I., строгий контроль от конструкции до сервиса — безопасность и простота для клиник.","dupDescription":"2","dupTitle":"0","h1":"Качество ATMOS®","lang":"ru","textLength":"4600","title":"Качество ATMOS® | ATMOS MedizinTechnik в Нижнем Новгороде","url":"https://www.atmos-med.ru/nizhnij-novgorod/about_us/kachestvo"},{"code":"200","description":"Миссия Атмос MedizinTechnik: «Вместе впереди» — разрабатывать интуитивные решения для врачей, чтобы они полностью сосредоточились на пациенте. С 1888 года компания создает надежное оборудование для ЛОР, гинекологии и аспирации: инновации, простота, поддержка.","dupDescription":"2","dupTitle":"0","h1":"Миссия","lang":"ru","textLength":"2803","title":"Миссия | ATMOS MedizinTechnik в Нижнем Новгороде","url":"https://www.atmos-med.ru/nizhnij-novgorod/about_us/missiya"},{"code":"200","description":"Центральный офис компании ATMOS MedizinTechnik. Подробная информация о представительстве ATMOS в России.","dupDescription":"2","dupTitle":"0","h1":"Центральный офис","lang":"ru","textLength":"7737","title":"Центральный офис | ATMOS MedizinTechnik в Нижнем Новгороде","url":"https://www.atmos-med.ru/nizhnij-novgorod/about_us/office"},{"code":"200","description":"Фотографии с выставок, конференций и форумов медицинского оборудования. Фото с практических курсов и мастер-классов по работе с продукцией ATMOS MedizinTechnik.","dupDescription":"2","dupTitle":"0","h1":"Фотографии","lang":"ru","textLength":"4954","title":"Фотографии | ATMOS MedizinTechnik в Нижнем Новгороде","url":"https://www.atmos-med.ru/nizhnij-novgorod/about_us/photos"},{"code":"200","description":"Информация о работе склада ATMOS MedizinTechnik. Адрес, контактные данные, время работы и схема проезда.","dupDescription":"2","dupTitle":"0","h1":"Склад","lang":"ru","textLength":"4201","title":"Склад | ATMOS MedizinTechnik в Нижнем Новгороде","url":"https://www.atmos-med.ru/nizhnij-novgorod/about_us/sklad"},{"code":"200","description":"Контакты официального представительства компании АТМОС в России. Телефоны для связи, время работы, адрес и схема проезда в офис ATMOS MedizinTechnik.","dupDescription":"2","dupTitle":"0","h1":"Контакты","lang":"ru","textLength":"4616","title":"Контакты | ATMOS MedizinTechnik в Нижнем Новгороде","url":"https://www.atmos-med.ru/nizhnij-novgorod/contacts"},{"code":"200","description":"Практические курсы, мастер-классы, вебинары и другие обучающие материалы от компании ATMOS MedizinTechnik.","dupDescription":"2","dupTitle":"0","h1":"Обучение","lang":"ru","textLength":"6825","title":"Обучение | ATMOS MedizinTechnik в Нижнем Новгороде","url":"https://www.atmos-med.ru/nizhnij-novgorod/education"},{"code":"200","description":"Налобные лампы | ATMOS MedizinTechnik в Нижнем Новгороде","dupDescription":"0","dupTitle":"0","h1":"Налобные лампы","lang":"ru","textLength":"5420","title":"Налобные лампы | ATMOS MedizinTechnik в Нижнем Новгороде","url":"https://www.atmos-med.ru/nizhnij-novgorod/nalobnye-lampy/atmosr-hl21-led"},{"code":"200","description":"КОМБО-КУРС для гинекологов, Москва | ATMOS MedizinTechnik в Нижнем Новгороде","dupDescription":"0","dupTitle":"0","h1":"КОМБО-КУРС для гинекологов\n\n Москва","lang":"ru","textLength":"4424","title":"КОМБО-КУРС для гинекологов, Москва | ATMOS MedizinTechnik в Нижнем Новгороде","url":"https://www.atmos-med.ru/nizhnij-novgorod/news/kombo-kurs-dlya-ginekologov-moskva-1"},{"code":"200","description":"Фотогалерея оборудования ATMOS MedizinTechnik: лор-комбайнов, аспираторов и гинекологических систем в топ-клиниках — Кунцевский центр, госпиталь им. Мандрыка, МЕДСИ, роддом №26, перинатальный центр Орла, МЦ \"София\" Анапа.","dupDescription":"2","dupTitle":"0","h1":"Фотогалерея","lang":"ru","textLength":"4712","title":"Фотогалерея | ATMOS MedizinTechnik в Нижнем Новгороде","url":"https://www.atmos-med.ru/nizhnij-novgorod/page/fotogalereya"},{"code":"200","description":"Гарантийное обслуживание | ATMOS MedizinTechnik в Нижнем Новгороде","dupDescription":"0","dupTitle":"0","h1":"Гарантийное обслуживание","lang":"ru","textLength":"9553","title":"Гарантийное обслуживание | ATMOS MedizinTechnik в Нижнем Новгороде","url":"https://www.atmos-med.ru/nizhnij-novgorod/page/garantiynoe-obsluzhivanie"},{"code":"200","description":"Монтаж и ввод в эксплуатацию | ATMOS MedizinTechnik в Нижнем Новгороде","dupDescription":"0","dupTitle":"0","h1":"Монтаж и ввод в эксплуатацию","lang":"ru","textLength":"4720","title":"Монтаж и ввод в эксплуатацию | ATMOS MedizinTechnik в Нижнем Новгороде","url":"https://www.atmos-med.ru/nizhnij-novgorod/page/montazh-i-vvod-v-ekspluataciyu"},{"code":"200","description":"Стратегия | ATMOS MedizinTechnik в Нижнем Новгороде","dupDescription":"0","dupTitle":"0","h1":"Стратегия","lang":"ru","textLength":"5914","title":"Стратегия | ATMOS MedizinTechnik в Нижнем Новгороде","url":"https://www.atmos-med.ru/nizhnij-novgorod/page/strategiya"},{"code":"200","description":"Условия отгрузки товара | ATMOS MedizinTechnik в Нижнем Новгороде","dupDescription":"0","dupTitle":"0","h1":"Условия отгрузки товара","lang":"ru","textLength":"4922","title":"Условия отгрузки товара | ATMOS MedizinTechnik в Нижнем Новгороде","url":"https://www.atmos-med.ru/nizhnij-novgorod/page/usloviya-otgruzki"},{"code":"200","description":"Оборудование для оториноларингологии купить Нижнем Новгороде по выгодной цене! Отоскопы, аудиометры, ЛОР‑комбайны, налобные осветители и инструменты. ЛОР-оборудование Атмос - полный комплект для оснащения кабинета. Сертифицировано, гарантия. Доставка по России.","dupDescription":"0","dupTitle":"0","h1":"Оториноларингология (ЛОР) Нижнем Новгороде","lang":"ru","textLength":"5425","title":"Оториноларингология (ЛОР) | ATMOS MedizinTechnik в Нижнем Новгороде","url":"https://www.atmos-med.ru/nizhnij-novgorod/product/lor"},{"code":"200","description":"Диагностическое оборудование Атмос купить Нижнем Новгороде: отоскопы, офтальмоскопы, ларингоскопы, пульсоксиметры, тонометры и станции ri-former для ЛОР, функциональной диагностики. Сертифицированные приборы для клиник и кабинетов. Гарантия, доставка по России.","dupDescription":"0","dupTitle":"0","h1":"Диагностическое ЛОР оборудование Нижнем Новгороде","lang":"ru","textLength":"4403","title":"Диагностическое ЛОР оборудование ATMOS Нижнем Новгороде. Купить диагностическое оборудование в ATMOS MedizinTechnik","url":"https://www.atmos-med.ru/nizhnij-novgorod/produkty/diagnostika"},{"code":"200","description":"Эндоскопы Атмос купить Нижнем Новгороде: гибкие и жесткие с сапфировыми линзами для ЛОР-диагностики глотки, гортани, носа. Немецкие видеоэндоскопы с LED-подсветкой, стробоскопией — автоклавируемые, эргономичные для клиник с доставкой по России.","dupDescription":"0","dupTitle":"0","h1":"Эндоскопы Нижнем Новгороде","lang":"ru","textLength":"4181","title":"Эндоскопы Нижнем Новгороде. Купить эндоскопы в ATMOS MedizinTechnik","url":"https://www.atmos-med.ru/nizhnij-novgorod/produkty/endoskopy"},{"code":"200","description":"ЛОР-камеры | ATMOS MedizinTechnik в Нижнем Новгороде","dupDescription":"0","dupTitle":"0","h1":"ЛОР-камеры","lang":"ru","textLength":"9753","title":"ATMOS Cam 21 / Cam 31 Нижнем Новгороде. Купить ЛОР-камеры в ATMOS MedizinTechnik","url":"https://www.atmos-med.ru/nizhnij-novgorod/produkty/lor-kamery/atmos-cam21-cam31"},{"code":"200","description":"ЛОР-установки Атмос Нижнем Новгороде: купить модульные комбайны для оториноларингологов с аспирацией, промыванием уха, распылением и автоматическим запуском. Немецкие ЛОР-комбайны с гигиеничными зонами, LED-подсветкой, подогревом зеркал — для полной диагностики и терапии с доставкой по России.","dupDescription":"0","dupTitle":"0","h1":"ЛОР Комбайны. Установка для оториноларинголога Нижнем Новгороде","lang":"ru","textLength":"5049","title":"ЛОР-комбайны ATMOS Нижнем Новгороде. Купить оборудование для оториноларинголога: ЛОР-установки Атмос","url":"https://www.atmos-med.ru/nizhnij-novgorod/produkty/lor_ustanovki"},{"code":"200","description":"Налобные лампы купить Нижнем Новгороде по выгодной цене. Современные LED‑модели с регулируемым углом наклона и фокусировкой луча для хирургии, ЛОР-врачей, гинекологов. Доставка по России, гарантия.","dupDescription":"0","dupTitle":"0","h1":"Налобные лампы Нижнем Новгороде","lang":"ru","textLength":"4233","title":"Налобные лампы Нижнем Новгороде. Купить налобные осветители для ЛОР-врача в ATMOS MedizinTechnik","url":"https://www.atmos-med.ru/nizhnij-novgorod/produkty/nalobnye_lampy"},{"code":"200","description":"Радиохирургия для ЛОР-практики | ATMOS MedizinTechnik в Нижнем Новгороде","dupDescription":"0","dupTitle":"0","h1":"Радиохирургия для ЛОР-практики","lang":"ru","textLength":"6545","title":"Радиохирургия для ЛОР-практики | ATMOS MedizinTechnik в Нижнем Новгороде","url":"https://www.atmos-med.ru/nizhnij-novgorod/produkty/terapiya/atmos-rs221-ent"},{"code":"200","description":"Реквизиты | ATMOS MedizinTechnik в Нижнем Новгороде","dupDescription":"0","dupTitle":"0","h1":"Реквизиты","lang":"ru","textLength":"4023","title":"Реквизиты | ATMOS MedizinTechnik в Нижнем Новгороде","url":"https://www.atmos-med.ru/nizhnij-novgorod/requisites"},{"code":"200","description":"Сервис Атмос в России: монтаж, настройка, обучение и гарантийное, постгарантийное обслуживание ЛОР-комбайнов, аспираторов и гинекологического оборудования. Квалифицированные специалисты — профилактика, ремонт по всей России.","dupDescription":"2","dupTitle":"0","h1":"Сервисное обслуживание медицинского оборудования АТМОС в России","lang":"ru","textLength":"5715","title":"Сервисное обслуживание медицинского оборудования АТМОС в России | ATMOS MedizinTechnik в Нижнем Новгороде","url":"https://www.atmos-med.ru/nizhnij-novgorod/service"},{"code":"200","description":"Специальные предложения Атмос MedizinTechnik. Выгодные акции на медицинское оборудование из Германии для оториноларингологии, гинекологии и хирургии.","dupDescription":"2","dupTitle":"0","h1":"Специальные предложения","lang":"ru","textLength":"4685","title":"Специальные предложения | ATMOS MedizinTechnik в Нижнем Новгороде","url":"https://www.atmos-med.ru/nizhnij-novgorod/specialnye-predlozheniya"},{"code":"200","description":"Радиохирургия | ATMOS MedizinTechnik в Нижнем Новгороде","dupDescription":"0","dupTitle":"0","h1":"Радиохирургия","lang":"ru","textLength":"6600","title":"Купить радиохирургический прибор Нижнем Новгороде. ATMOS RS 221 Gyne в ATMOS MedizinTechnik","url":"https://www.atmos-med.ru/nizhnij-novgorod/terapiya/atmos-rs-221-gyne"},{"code":"200","description":"В наличии на складе | ATMOS MedizinTechnik в Нижнем Новгороде","dupDescription":"0","dupTitle":"0","h1":"В наличии на складе","lang":"ru","textLength":"7550","title":"В наличии на складе | ATMOS MedizinTechnik в Нижнем Новгороде","url":"https://www.atmos-med.ru/nizhnij-novgorod/v-nalichii-na-sklade"},{"code":"200","description":"Вакансии ATMOS MedizinTechnik в России: работа с медицинским оборудованием для ЛОР, гинекологии и аспирации в надежной компании — Москва, Краснодар, Владивосток. Присоединяйтесь к команде профессионалов: монтаж, сервис, продажи оборудования ATMOS в клиниках.","dupDescription":"2","dupTitle":"0","h1":"Вакансии","lang":"ru","textLength":"3794","title":"Вакансии | ATMOS MedizinTechnik в Нижнем Новгороде","url":"https://www.atmos-med.ru/nizhnij-novgorod/vacancy"},{"code":"200","description":"АТМОС производит инновационную медицинскую технику. Гинекология, Аспирационные системы, Лор. История компании ATMOS. Сервис. Новости. Контакты. Сайт в Новосибирске","dupDescription":"0","dupTitle":"0","h1":"Медицинское оборудование из ГЕРМАНИИ для оториноларингологии\n гинекологии и хирургии (аспирационные системы) – БЕЗОПАСНО И НАДЁЖНО","lang":"ru","textLength":"6930","title":"Представительство компании АТМОС в России. Официальный сайт ATMOS MedizinTechnik в Новосибирске","url":"https://www.atmos-med.ru/novosibirsk/"},{"code":"200","description":"Гинекологическое оборудование Новосибирске — купить по выгодной цене современные решения от ведущих производителей. Цифровые кольпоскопы с видеофиксацией, эргономичные кресла с электроприводом, аппараты для пренатальной диагностики. Соответствие стандартам Минздрава РФ. Гарантия, обучение персонала, доставка по России. Оставьте заявку!","dupDescription":"0","dupTitle":"0","h1":"Гинекологическое оборудование Новосибирске","lang":"ru","textLength":"5310","title":"Гинекологическое оборудование Новосибирске. Купить оборудование для гинекологического кабинета под ключ в ATMOS MedizinTechnik","url":"https://www.atmos-med.ru/novosibirsk/product/ginekologiya"},{"code":"200","description":"| ATMOS MedizinTechnik в Новосибирске","dupDescription":"2","dupTitle":"0","h1":"Хирургические аспираторы Новосибирске","lang":"ru","textLength":"4790","title":"Хирургические аспираторы | ATMOS MedizinTechnik в Новосибирске","url":"https://www.atmos-med.ru/novosibirsk/produkty/khirurgicheskie-aspiratory"},{"code":"200","description":"| ATMOS MedizinTechnik в Новосибирске","dupDescription":"2","dupTitle":"0","h1":"Медицинские аспираторы и аспирационные системы Новосибирске","lang":"ru","textLength":"5817","title":"Медицинские аспираторы и аспирационные системы | ATMOS MedizinTechnik в Новосибирске","url":"https://www.atmos-med.ru/novosibirsk/produkty/medicinskie-aspiratory-i-aspiracionnye-sistemy"},{"code":"200","description":"Специальные аспираторы для гинекологии Новосибирске — покупайте по выгодной цене современные мобильные решения. Компактные модели с цифровым дисплеем, автоматическим отключением, работой от аккумулятора и сети. Модели для гинекологии и акушерства, вакуумэкстракции с микропроцессорным управлением, Smart-режимом. Компактные системы с DDS бесшлангового соединения, защитой от переполнения для роддомов","dupDescription":"0","dupTitle":"0","h1":"Специальные аспираторы для гинекологии Новосибирске","lang":"ru","textLength":"4293","title":"Специальные аспираторы для гинекологии Новосибирске. Купить специальный аспиратор в ATMOS MedizinTechnik","url":"https://www.atmos-med.ru/novosibirsk/produkty/spetsialnye_aspiratory"},{"code":"200","description":"Торакальные аспираторы купить Новосибирске по выгодной цене! Портативные модели с работой от аккумулятора до 12 часов — для торакальной хирургии, пульмонологии и дренажа. Мобильные системы с цифровым контролем вакуума на стороне пациента. Сертифицировано. Доставка по России.","dupDescription":"0","dupTitle":"0","h1":"Торакальные аспираторы Новосибирске","lang":"ru","textLength":"4420","title":"Торакальные аспираторы Новосибирске. Купить торакальные аспираторы в ATMOS MedizinTechnik","url":"https://www.atmos-med.ru/novosibirsk/produkty/torakalnye-aspiratory"},{"code":"200","description":"Загрузки | ATMOS MedizinTechnik в Москве","dupDescription":"0","dupTitle":"0","h1":"Загрузки","lang":"ru","textLength":"5120","title":"Загрузки | ATMOS MedizinTechnik в Москве","url":"https://www.atmos-med.ru/page/downloads"},{"code":"200","description":"Гинекологическое оборудование Москве — купить по выгодной цене современные решения от ведущих производителей. Цифровые кольпоскопы с видеофиксацией, эргономичные кресла с электроприводом, аппараты для пренатальной диагностики. Соответствие стандартам Минздрава РФ. Гарантия, обучение персонала, доставка по России. Оставьте заявку!","dupDescription":"0","dupTitle":"0","h1":"Гинекологическое оборудование Москве","lang":"ru","textLength":"5293","title":"Гинекологическое оборудование Москве. Купить оборудование для гинекологического кабинета под ключ в ATMOS MedizinTechnik","url":"https://www.atmos-med.ru/product/ginekologiya"},{"code":"200","description":"Кольпоскопы | ATMOS MedizinTechnik в Москве","dupDescription":"0","dupTitle":"0","h1":"Кольпоскопы","lang":"ru","textLength":"9578","title":"Кольпоскопы | ATMOS MedizinTechnik в Москве","url":"https://www.atmos-med.ru/product/kolposkop"},{"code":"200","description":"Оборудование для оториноларингологии купить Москве по выгодной цене! Отоскопы, аудиометры, ЛОР‑комбайны, налобные осветители и инструменты. ЛОР-оборудование Атмос - полный комплект для оснащения кабинета. Сертифицировано, гарантия. Доставка по России.","dupDescription":"0","dupTitle":"0","h1":"Оториноларингология (ЛОР) Москве","lang":"ru","textLength":"5381","title":"Оториноларингология (ЛОР) | ATMOS MedizinTechnik в Москве","url":"https://www.atmos-med.ru/product/lor"},{"code":"200","description":"Специальные аспираторы для гинекологии Москве — покупайте по выгодной цене современные мобильные решения. Компактные модели с цифровым дисплеем, автоматическим отключением, работой от аккумулятора и сети. Модели для гинекологии и акушерства, вакуумэкстракции с микропроцессорным управлением, Smart-режимом. Компактные системы с DDS бесшлангового соединения, защитой от переполнения для роддомов и кли","dupDescription":"0","dupTitle":"0","h1":"Специальные аспираторы для гинекологии Москве","lang":"ru","textLength":"4276","title":"Специальные аспираторы для гинекологии Москве. Купить специальный аспиратор в ATMOS MedizinTechnik","url":"https://www.atmos-med.ru/product/spetsialnye_aspiratory"},{"code":"200","description":"Оборудование Атмос MedizinTechnik купить Москве по выгодной цене: ЛОР-комбайны, хирургические и торакальные аспираторы, гинекологические системы, эндоскопы, кресла, налобные лампы и диагностика. Немецкое медоборудование для оториноларингологии, хирургии и родовспоможения — модульные решения с гарантией качества. Доставка по России.","dupDescription":"0","dupTitle":"0","h1":"Оборудование","lang":"ru","textLength":"3759","title":"Оборудование | ATMOS MedizinTechnik в Москве","url":"https://www.atmos-med.ru/produkty"},{"code":"200","description":"Портативные аспираторы ATMOS для верхних дыхательных путей (ВДП) купить Москве по выгодной цене. Доставка по России. Компактные модели — немецкое качество для ЛОР-кабинетов и стационаров.","dupDescription":"0","dupTitle":"0","h1":"Аспираторы для верхних дыхательных путей","lang":"ru","textLength":"3871","title":"Аспираторы для верхних дыхательных путей | ATMOS MedizinTechnik в Москве","url":"https://www.atmos-med.ru/produkty/aspiratory-dlya-sanacii"},{"code":"200","description":"Портативные аспираторы ATMOS для верхних дыхательных путей (ВДП) купить Москве по выгодной цене. Доставка по России. Компактные модели — немецкое качество для ЛОР-кабинетов и стационаров.","dupDescription":"0","dupTitle":"0","h1":"Аспираторы для верхних дыхательных путей","lang":"ru","textLength":"3871","title":"Аспираторы для верхних дыхательных путей | ATMOS MedizinTechnik в Москве","url":"https://www.atmos-med.ru/produkty/aspiratory-dlya-verkhnikh-dykhatelnykh-putey"},{"code":"200","description":"Диагностическое оборудование Атмос купить Москве: отоскопы, офтальмоскопы, ларингоскопы, пульсоксиметры, тонометры и станции ri-former для ЛОР, функциональной диагностики. Сертифицированные приборы для клиник и кабинетов. Гарантия, доставка по России.","dupDescription":"0","dupTitle":"0","h1":"Диагностическое ЛОР оборудование Москве","lang":"ru","textLength":"4359","title":"Диагностическое ЛОР оборудование ATMOS Москве. Купить диагностическое оборудование в ATMOS MedizinTechnik","url":"https://www.atmos-med.ru/produkty/diagnostika"},{"code":"200","description":"Эндоскопы Атмос купить Москве: гибкие и жесткие с сапфировыми линзами для ЛОР-диагностики глотки, гортани, носа. Немецкие видеоэндоскопы с LED-подсветкой, стробоскопией — автоклавируемые, эргономичные для клиник с доставкой по России.","dupDescription":"0","dupTitle":"0","h1":"Эндоскопы Москве","lang":"ru","textLength":"4137","title":"Эндоскопы Москве. Купить эндоскопы в ATMOS MedizinTechnik","url":"https://www.atmos-med.ru/produkty/endoskopy"},{"code":"200","description":"| ATMOS MedizinTechnik в Москве","dupDescription":"2","dupTitle":"0","h1":"Хирургические аспираторы Москве","lang":"ru","textLength":"4773","title":"Хирургические аспираторы | ATMOS MedizinTechnik в Москве","url":"https://www.atmos-med.ru/produkty/khirurgicheskie-aspiratory"},{"code":"200","description":"Хирургический аспиратор ATMOS Record 55 | ATMOS MedizinTechnik в Москве","dupDescription":"0","dupTitle":"0","h1":"Хирургический аспиратор ATMOS Record 55","lang":"ru","textLength":"8173","title":"Хирургический аспиратор ATMOS Record 55 | ATMOS MedizinTechnik в Москве","url":"https://www.atmos-med.ru/produkty/khirurgicheskie-aspiratory/khirurgicheskiy-aspirator-atmos-record-55"},{"code":"200","description":"ЛОР-камеры | ATMOS MedizinTechnik в Москве","dupDescription":"0","dupTitle":"0","h1":"ЛОР-камеры","lang":"ru","textLength":"9745","title":"ATMOS Cam 21 / Cam 31 Москве. Купить ЛОР-камеры в ATMOS MedizinTechnik","url":"https://www.atmos-med.ru/produkty/lor-kamery/atmos-cam21-cam31"},{"code":"200","description":"ЛОР-установки Атмос Москве: купить модульные комбайны для оториноларингологов с аспирацией, промыванием уха, распылением и автоматическим запуском. Немецкие ЛОР-комбайны с гигиеничными зонами, LED-подсветкой, подогревом зеркал — для полной диагностики и терапии с доставкой по России.","dupDescription":"0","dupTitle":"0","h1":"ЛОР Комбайны. Установка для оториноларинголога Москве","lang":"ru","textLength":"5224","title":"ЛОР-комбайны ATMOS Москве. Купить оборудование для оториноларинголога: ЛОР-установки Атмос","url":"https://www.atmos-med.ru/produkty/lor_ustanovki"},{"code":"200","description":"| ATMOS MedizinTechnik в Москве","dupDescription":"2","dupTitle":"0","h1":"Медицинские аспираторы и аспирационные системы Москве","lang":"ru","textLength":"5800","title":"Медицинские аспираторы и аспирационные системы | ATMOS MedizinTechnik в Москве","url":"https://www.atmos-med.ru/produkty/medicinskie-aspiratory-i-aspiracionnye-sistemy"},{"code":"200","description":"Налобные лампы купить Москве по выгодной цене. Современные LED‑модели с регулируемым углом наклона и фокусировкой луча для хирургии, ЛОР-врачей, гинекологов. Доставка по России, гарантия.","dupDescription":"0","dupTitle":"0","h1":"Налобные лампы Москве","lang":"ru","textLength":"4180","title":"Налобные лампы Москве. Купить налобные осветители для ЛОР-врача в ATMOS MedizinTechnik","url":"https://www.atmos-med.ru/produkty/nalobnye_lampy"},{"code":"200","description":"| ATMOS MedizinTechnik в Москве","dupDescription":"0","dupTitle":"0","h1":"Регуляторы вакуума для центральных систем газоснабжения","lang":"ru","textLength":"4370","title":"Регуляторы вакуума для центральных систем газоснабжения | ATMOS MedizinTechnik в Москве","url":"https://www.atmos-med.ru/produkty/regulyatory-vakuuma-dlya-centralnykh-sistem-gazosnabzheniya"},{"code":"200","description":"Аспиратор ATMOS C 451 | ATMOS MedizinTechnik в Москве","dupDescription":"0","dupTitle":"0","h1":"Аспиратор ATMOS C 451","lang":"ru","textLength":"5364","title":"ATMOS C 451 Москве. Купить специальный аспиратор в ATMOS MedizinTechnik","url":"https://www.atmos-med.ru/produkty/specialnye-aspiratory-dlya-ginekologii/atmos-c-451"},{"code":"200","description":"Аспиратор для родовспоможения ATMOS S 351 Natal | ATMOS MedizinTechnik в Москве","dupDescription":"0","dupTitle":"0","h1":"Аспиратор для родовспоможения ATMOS S 351 Natal","lang":"ru","textLength":"8709","title":"Аспиратор для родовспоможения ATMOS S 351 Natal | ATMOS MedizinTechnik в Москве","url":"https://www.atmos-med.ru/produkty/specialnye-aspiratory-dlya-ginekologii/atmos-s-351-natal"},{"code":"200","description":"Специальные аспираторы для гинекологии Москве — покупайте по выгодной цене современные мобильные решения. Компактные модели с цифровым дисплеем, автоматическим отключением, работой от аккумулятора и сети. Модели для гинекологии и акушерства, вакуумэкстракции с микропроцессорным управлением, Smart-режимом. Компактные системы с DDS бесшлангового соединения, защитой от переполнения для роддомов и кли","dupDescription":"0","dupTitle":"0","h1":"Специальные аспираторы для гинекологии Москве","lang":"ru","textLength":"4276","title":"Специальные аспираторы для гинекологии Москве. Купить специальный аспиратор в ATMOS MedizinTechnik","url":"https://www.atmos-med.ru/produkty/spetsialnye_aspiratory"},{"code":"200","description":"Радиохирургия для ЛОР-практики | ATMOS MedizinTechnik в Москве","dupDescription":"0","dupTitle":"0","h1":"Радиохирургия для ЛОР-практики","lang":"ru","textLength":"6537","title":"Радиохирургия для ЛОР-практики | ATMOS MedizinTechnik в Москве","url":"https://www.atmos-med.ru/produkty/terapiya/atmos-rs221-ent"},{"code":"200","description":"Торакальные аспираторы купить Москве по выгодной цене! Портативные модели с работой от аккумулятора до 12 часов — для торакальной хирургии, пульмонологии и дренажа. Мобильные системы с цифровым контролем вакуума на стороне пациента. Сертифицировано. Доставка по России.","dupDescription":"0","dupTitle":"0","h1":"Торакальные аспираторы Москве","lang":"ru","textLength":"4403","title":"Торакальные аспираторы Москве. Купить торакальные аспираторы в ATMOS MedizinTechnik","url":"https://www.atmos-med.ru/produkty/torakalnye-aspiratory"},{"code":"200","description":"АТМОС производит инновационную медицинскую технику. Гинекология, Аспирационные системы, Лор. История компании ATMOS. Сервис. Новости. Контакты. Сайт в Санкт-Петербурге","dupDescription":"0","dupTitle":"0","h1":"Медицинское оборудование из ГЕРМАНИИ для оториноларингологии\n гинекологии и хирургии (аспирационные системы) – БЕЗОПАСНО И НАДЁЖНО","lang":"ru","textLength":"6930","title":"Представительство компании АТМОС в России. Официальный сайт ATMOS MedizinTechnik в Санкт-Петербурге","url":"https://www.atmos-med.ru/sanktpeterburg/"},{"code":"200","description":"АТМОС производит инновационную медицинскую технику. Гинекология, Аспирационные системы, Лор. История компании ATMOS. Сервис. Новости. Контакты. Сайт в Ставрополе","dupDescription":"0","dupTitle":"0","h1":"Медицинское оборудование из ГЕРМАНИИ для оториноларингологии\n гинекологии и хирургии (аспирационные системы) – БЕЗОПАСНО И НАДЁЖНО","lang":"ru","textLength":"6930","title":"Представительство компании АТМОС в России. Официальный сайт ATMOS MedizinTechnik в Ставрополе","url":"https://www.atmos-med.ru/stavropol/"},{"code":"200","description":"Радиохирургия | ATMOS MedizinTechnik в Москве","dupDescription":"0","dupTitle":"0","h1":"Радиохирургия","lang":"ru","textLength":"6592","title":"Купить радиохирургический прибор Москве. ATMOS RS 221 Gyne в ATMOS MedizinTechnik","url":"https://www.atmos-med.ru/terapiya/atmos-rs-221-gyne"},{"code":"200","description":"Торакальный аспиратор ATMOS C 051 Thorax | ATMOS MedizinTechnik в Москве","dupDescription":"0","dupTitle":"0","h1":"Торакальный аспиратор ATMOS C 051 Thorax","lang":"ru","textLength":"7057","title":"Торакальный аспиратор ATMOS C 051 Thorax | ATMOS MedizinTechnik в Москве","url":"https://www.atmos-med.ru/torakalnye-aspiratory/atmos-c051-thorax"},{"code":"200","description":"Торакальный аспиратор ATMOS S 201 Thorax | ATMOS MedizinTechnik в Москве","dupDescription":"0","dupTitle":"0","h1":"Торакальный аспиратор ATMOS S 201 Thorax","lang":"ru","textLength":"8616","title":"ATMOS S 201 Thorax Москве. Купить торакальный аспиратор S 201 Thorax в ATMOS MedizinTechnik","url":"https://www.atmos-med.ru/torakalnye-aspiratory/atmos-s201-thorax"},{"code":"200","description":"АТМОС производит инновационную медицинскую технику. Гинекология, Аспирационные системы, Лор. История компании ATMOS. Сервис. Новости. Контакты. Сайт в Уфе","dupDescription":"0","dupTitle":"0","h1":"Медицинское оборудование из ГЕРМАНИИ для оториноларингологии\n гинекологии и хирургии (аспирационные системы) – БЕЗОПАСНО И НАДЁЖНО","lang":"ru","textLength":"6930","title":"Представительство компании АТМОС в России. Официальный сайт ATMOS MedizinTechnik в Уфе","url":"https://www.atmos-med.ru/ufa/"},{"code":"200","description":"Видео | ATMOS MedizinTechnik в Москве","dupDescription":"0","dupTitle":"0","h1":"Видео","lang":"ru","textLength":"8161","title":"Видео | ATMOS MedizinTechnik в Москве","url":"https://www.atmos-med.ru/video"},{"code":"200","description":"АТМОС производит инновационную медицинскую технику. Гинекология, Аспирационные системы, Лор. История компании ATMOS. Сервис. Новости. Контакты. Сайт в Владивостоке","dupDescription":"0","dupTitle":"0","h1":"Медицинское оборудование из ГЕРМАНИИ для оториноларингологии\n гинекологии и хирургии (аспирационные системы) – БЕЗОПАСНО И НАДЁЖНО","lang":"ru","textLength":"6930","title":"Представительство компании АТМОС в России. Официальный сайт ATMOS MedizinTechnik в Владивостоке","url":"https://www.atmos-med.ru/vladivostok/"},{"code":"200","description":"Портативные аспираторы ATMOS для верхних дыхательных путей (ВДП) купить Владивостоке по выгодной цене. Доставка по России. Компактные модели — немецкое качество для ЛОР-кабинетов и стационаров.","dupDescription":"0","dupTitle":"0","h1":"Аспираторы для верхних дыхательных путей","lang":"ru","textLength":"3876","title":"Аспираторы для верхних дыхательных путей | ATMOS MedizinTechnik в Владивостоке","url":"https://www.atmos-med.ru/vladivostok/produkty/aspiratory-dlya-verkhnikh-dykhatelnykh-putey"},{"code":"200","description":"АТМОС производит инновационную медицинскую технику. Гинекология, Аспирационные системы, Лор. История компании ATMOS. Сервис. Новости. Контакты. Сайт в Якутске","dupDescription":"0","dupTitle":"0","h1":"Медицинское оборудование из ГЕРМАНИИ для оториноларингологии\n гинекологии и хирургии (аспирационные системы) – БЕЗОПАСНО И НАДЁЖНО","lang":"ru","textLength":"6930","title":"Представительство компании АТМОС в России. Официальный сайт ATMOS MedizinTechnik в Якутске","url":"https://www.atmos-med.ru/yakutsk/"},{"code":"200","description":"О компании АТМОС - Официальный представитель ATMOS MedizinTechnik в России | ATMOS MedizinTechnik в Якутске","dupDescription":"0","dupTitle":"0","h1":"О компании АТМОС - Официальный представитель ATMOS MedizinTechnik в России","lang":"ru","textLength":"7364","title":"О компании АТМОС - Официальный представитель ATMOS MedizinTechnik в России | ATMOS MedizinTechnik в Якутске","url":"https://www.atmos-med.ru/yakutsk/about_us"},{"code":"200","description":"Выставки Атмос MedizinTechnik в России: отчеты о ключевых событиях 2025–2026, мастер-классы по микро-эндоскопической хирургии уха в НКЦО ФМБА. Анонсы будущих выставок.","dupDescription":"2","dupTitle":"0","h1":"Выставки","lang":"ru","textLength":"8723","title":"Выставки | ATMOS MedizinTechnik в Якутске","url":"https://www.atmos-med.ru/yakutsk/about_us/exhibitions"},{"code":"200","description":"ATMOS MedizinTechnik. История развития бренда ATMOS. Узнайте подробнее о достижениях и развитии компании.","dupDescription":"2","dupTitle":"0","h1":"История","lang":"ru","textLength":"5755","title":"История | ATMOS MedizinTechnik в Якутске","url":"https://www.atmos-med.ru/yakutsk/about_us/history"},{"code":"200","description":"Качество ATMOS MedizinTechnik — залог надежности немецкого медоборудования для ЛОР, хирургии и гинекологии с 1904 года. Сертифицированные системы DDS, H.A.S.I., строгий контроль от конструкции до сервиса — безопасность и простота для клиник.","dupDescription":"2","dupTitle":"0","h1":"Качество ATMOS®","lang":"ru","textLength":"4592","title":"Качество ATMOS® | ATMOS MedizinTechnik в Якутске","url":"https://www.atmos-med.ru/yakutsk/about_us/kachestvo"},{"code":"200","description":"Миссия Атмос MedizinTechnik: «Вместе впереди» — разрабатывать интуитивные решения для врачей, чтобы они полностью сосредоточились на пациенте. С 1888 года компания создает надежное оборудование для ЛОР, гинекологии и аспирации: инновации, простота, поддержка.","dupDescription":"2","dupTitle":"0","h1":"Миссия","lang":"ru","textLength":"2795","title":"Миссия | ATMOS MedizinTechnik в Якутске","url":"https://www.atmos-med.ru/yakutsk/about_us/missiya"},{"code":"200","description":"Центральный офис компании ATMOS MedizinTechnik. Подробная информация о представительстве ATMOS в России.","dupDescription":"2","dupTitle":"0","h1":"Центральный офис","lang":"ru","textLength":"7729","title":"Центральный офис | ATMOS MedizinTechnik в Якутске","url":"https://www.atmos-med.ru/yakutsk/about_us/office"},{"code":"200","description":"Фотографии с выставок, конференций и форумов медицинского оборудования. Фото с практических курсов и мастер-классов по работе с продукцией ATMOS MedizinTechnik.","dupDescription":"2","dupTitle":"0","h1":"Фотографии","lang":"ru","textLength":"4946","title":"Фотографии | ATMOS MedizinTechnik в Якутске","url":"https://www.atmos-med.ru/yakutsk/about_us/photos"},{"code":"200","description":"Информация о работе склада ATMOS MedizinTechnik. Адрес, контактные данные, время работы и схема проезда.","dupDescription":"2","dupTitle":"0","h1":"Склад","lang":"ru","textLength":"4193","title":"Склад | ATMOS MedizinTechnik в Якутске","url":"https://www.atmos-med.ru/yakutsk/about_us/sklad"},{"code":"200","description":"Контакты официального представительства компании АТМОС в России. Телефоны для связи, время работы, адрес и схема проезда в офис ATMOS MedizinTechnik.","dupDescription":"2","dupTitle":"0","h1":"Контакты","lang":"ru","textLength":"4431","title":"Контакты | ATMOS MedizinTechnik в Якутске","url":"https://www.atmos-med.ru/yakutsk/contacts"},{"code":"200","description":"Практические курсы, мастер-классы, вебинары и другие обучающие материалы от компании ATMOS MedizinTechnik.","dupDescription":"2","dupTitle":"0","h1":"Обучение","lang":"ru","textLength":"6817","title":"Обучение | ATMOS MedizinTechnik в Якутске","url":"https://www.atmos-med.ru/yakutsk/education"},{"code":"200","description":"КОМБО-КУРС для гинекологов, Москва | ATMOS MedizinTechnik в Якутске","dupDescription":"0","dupTitle":"0","h1":"КОМБО-КУРС для гинекологов\n\n Москва","lang":"ru","textLength":"4416","title":"КОМБО-КУРС для гинекологов, Москва | ATMOS MedizinTechnik в Якутске","url":"https://www.atmos-med.ru/yakutsk/news/kombo-kurs-dlya-ginekologov-moskva-1"},{"code":"200","description":"Фотогалерея оборудования ATMOS MedizinTechnik: лор-комбайнов, аспираторов и гинекологических систем в топ-клиниках — Кунцевский центр, госпиталь им. Мандрыка, МЕДСИ, роддом №26, перинатальный центр Орла, МЦ \"София\" Анапа.","dupDescription":"2","dupTitle":"0","h1":"Фотогалерея","lang":"ru","textLength":"4704","title":"Фотогалерея | ATMOS MedizinTechnik в Якутске","url":"https://www.atmos-med.ru/yakutsk/page/fotogalereya"},{"code":"200","description":"Гарантийное обслуживание | ATMOS MedizinTechnik в Якутске","dupDescription":"0","dupTitle":"0","h1":"Гарантийное обслуживание","lang":"ru","textLength":"9545","title":"Гарантийное обслуживание | ATMOS MedizinTechnik в Якутске","url":"https://www.atmos-med.ru/yakutsk/page/garantiynoe-obsluzhivanie"},{"code":"200","description":"Монтаж и ввод в эксплуатацию | ATMOS MedizinTechnik в Якутске","dupDescription":"0","dupTitle":"0","h1":"Монтаж и ввод в эксплуатацию","lang":"ru","textLength":"4712","title":"Монтаж и ввод в эксплуатацию | ATMOS MedizinTechnik в Якутске","url":"https://www.atmos-med.ru/yakutsk/page/montazh-i-vvod-v-ekspluataciyu"},{"code":"200","description":"Стратегия | ATMOS MedizinTechnik в Якутске","dupDescription":"0","dupTitle":"0","h1":"Стратегия","lang":"ru","textLength":"5906","title":"Стратегия | ATMOS MedizinTechnik в Якутске","url":"https://www.atmos-med.ru/yakutsk/page/strategiya"},{"code":"200","description":"Условия отгрузки товара | ATMOS MedizinTechnik в Якутске","dupDescription":"0","dupTitle":"0","h1":"Условия отгрузки товара","lang":"ru","textLength":"4914","title":"Условия отгрузки товара | ATMOS MedizinTechnik в Якутске","url":"https://www.atmos-med.ru/yakutsk/page/usloviya-otgruzki"},{"code":"200","description":"Эндоскопы Атмос купить Якутске: гибкие и жесткие с сапфировыми линзами для ЛОР-диагностики глотки, гортани, носа. Немецкие видеоэндоскопы с LED-подсветкой, стробоскопией — автоклавируемые, эргономичные для клиник с доставкой по России.","dupDescription":"0","dupTitle":"0","h1":"Эндоскопы Якутске","lang":"ru","textLength":"4141","title":"Эндоскопы Якутске. Купить эндоскопы в ATMOS MedizinTechnik","url":"https://www.atmos-med.ru/yakutsk/produkty/endoskopy"},{"code":"200","description":"Радиохирургия для ЛОР-практики | ATMOS MedizinTechnik в Якутске","dupDescription":"0","dupTitle":"0","h1":"Радиохирургия для ЛОР-практики","lang":"ru","textLength":"6537","title":"Радиохирургия для ЛОР-практики | ATMOS MedizinTechnik в Якутске","url":"https://www.atmos-med.ru/yakutsk/produkty/terapiya/atmos-rs221-ent"},{"code":"200","description":"Реквизиты | ATMOS MedizinTechnik в Якутске","dupDescription":"0","dupTitle":"0","h1":"Реквизиты","lang":"ru","textLength":"4015","title":"Реквизиты | ATMOS MedizinTechnik в Якутске","url":"https://www.atmos-med.ru/yakutsk/requisites"},{"code":"200","description":"Сервис Атмос в России: монтаж, настройка, обучение и гарантийное, постгарантийное обслуживание ЛОР-комбайнов, аспираторов и гинекологического оборудования. Квалифицированные специалисты — профилактика, ремонт по всей России.","dupDescription":"2","dupTitle":"0","h1":"Сервисное обслуживание медицинского оборудования АТМОС в России","lang":"ru","textLength":"5707","title":"Сервисное обслуживание медицинского оборудования АТМОС в России | ATMOS MedizinTechnik в Якутске","url":"https://www.atmos-med.ru/yakutsk/service"},{"code":"200","description":"Специальные предложения Атмос MedizinTechnik. Выгодные акции на медицинское оборудование из Германии для оториноларингологии, гинекологии и хирургии.","dupDescription":"2","dupTitle":"0","h1":"Специальные предложения","lang":"ru","textLength":"4677","title":"Специальные предложения | ATMOS MedizinTechnik в Якутске","url":"https://www.atmos-med.ru/yakutsk/specialnye-predlozheniya"},{"code":"200","description":"В наличии на складе | ATMOS MedizinTechnik в Якутске","dupDescription":"0","dupTitle":"0","h1":"В наличии на складе","lang":"ru","textLength":"7542","title":"В наличии на складе | ATMOS MedizinTechnik в Якутске","url":"https://www.atmos-med.ru/yakutsk/v-nalichii-na-sklade"},{"code":"200","description":"Вакансии ATMOS MedizinTechnik в России: работа с медицинским оборудованием для ЛОР, гинекологии и аспирации в надежной компании — Москва, Краснодар, Владивосток. Присоединяйтесь к команде профессионалов: монтаж, сервис, продажи оборудования ATMOS в клиниках.","dupDescription":"2","dupTitle":"0","h1":"Вакансии","lang":"ru","textLength":"3786","title":"Вакансии | ATMOS MedizinTechnik в Якутске","url":"https://www.atmos-med.ru/yakutsk/vacancy"}]</script>
+<script>
+'use strict';
+/* ================= данные ================= */
+const BUILTIN = JSON.parse(document.getElementById('report-data').textContent);
+const LS = {
+  get(k, d){ try{ const v = localStorage.getItem(k); return v === null ? d : JSON.parse(v); }catch(e){ return d; } },
+  set(k, v){ try{ localStorage.setItem(k, JSON.stringify(v)); }catch(e){} },
+  del(k){ try{ localStorage.removeItem(k); }catch(e){} },
+};
+const state = {
+  rows: [],                 // {code,url,lang,h1,title,description,dupTitle,dupDescription,textLength,draft:{title,description},live:{...}|null}
+  open: new Set(),
+  running: false,
+  abort: false,
+  soft: LS.get('dmc_v1_soft', true),
+  via: '',
+  lastDone: 0,
+};
+const $ = s => document.querySelector(s);
+
+/* ================= утилиты ================= */
+function esc(s){ return String(s ?? '').replace(/[&<>"']/g, c => ({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c])); }
+function norm(s){ return String(s ?? '').replace(/\s+/g,' ').trim(); }
+function soft(s){ return norm(s).toLowerCase().replace(/[\p{P}\p{S}]/gu,'').replace(/\s+/g,' ').trim(); }
+function cmpVal(s){ return state.soft ? soft(s) : norm(s); }
+function fmtTs(ts){ const d = new Date(ts); const p = n => String(n).padStart(2,'0'); return p(d.getDate()) + '.' + p(d.getMonth()+1) + ' ' + p(d.getHours()) + ':' + p(d.getMinutes()); }
+async function mapPool(items, limit, fn, onProgress){
+  let i = 0, done = 0;
+  async function worker(){
+    while(i < items.length){
+      const idx = i++;
+      try{ await fn(items[idx], idx); }catch(e){}
+      done++; if(onProgress) onProgress(done, items.length);
+    }
+  }
+  await Promise.all(Array.from({length: Math.min(limit, items.length)}, worker));
+}
+
+/* ================= загрузка через прокси ================= */
+const PROXIES = [
+  { name:'allorigins',   make:(u,s)=>fetch('https://api.allorigins.win/raw?url='+encodeURIComponent(u), {signal:s}) },
+  { name:'corsproxy.io', make:(u,s)=>fetch('https://corsproxy.io/?url='+encodeURIComponent(u), {signal:s}) },
+  { name:'codetabs',     make:(u,s)=>fetch('https://api.codetabs.com/v1/proxy?quest='+encodeURIComponent(u), {signal:s}) },
+  { name:'cors.eu.org',  make:(u,s)=>fetch('https://cors.eu.org/'+u, {signal:s}) },
+  { name:'r.jina.ai',    make:(u,s)=>fetch('https://r.jina.ai/'+u, {signal:s, headers:{'x-return-format':'html'}}) },
+];
+async function fetchRaw(url, {timeout=35000}={}){
+  if(state.abort) throw new Error('остановлено');
+  const attempts = [];
+  if(location.protocol.startsWith('http')) attempts.push({ name:'прямой запрос', make:(u,s)=>fetch(u, {signal:s}) });
+  attempts.push(...PROXIES);
+  const errs = [];
+  for(const a of attempts){
+    if(state.abort) throw new Error('остановлено');
+    try{
+      const ctl = new AbortController();
+      const t = setTimeout(() => ctl.abort(), timeout);
+      const res = await a.make(url, ctl.signal);
+      clearTimeout(t);
+      const text = await res.text();
+      if(!text || text.trim().length < 40){ errs.push(a.name + ': пустой ответ'); continue; }
+      const head = text.trim().slice(0, 200);
+      if(/error code: \d+/i.test(head) || /^{"error"/i.test(head) || /valid api key/i.test(head)){ errs.push(a.name + ': ' + head.slice(0, 60)); continue; }
+      return { text, via: a.name };
+    }catch(e){
+      errs.push(a.name + ': ' + (e && e.name === 'AbortError' ? 'таймаут' : (e && e.message || 'ошибка')));
+    }
+  }
+  throw new Error('не удалось загрузить — ' + errs.slice(0, 3).join('; '));
+}
+
+/* ================= разбор живой страницы ================= */
+function parseLive(html, pageUrl){
+  const out = { title:'', description:'', h1:'', h1Count:0, canonical:'', currentPath:'', suspect404:false };
+  let doc;
+  try{ doc = new DOMParser().parseFromString(html, 'text/html'); }catch(e){ return out; }
+  const t = doc.querySelector('title');
+  if(t) out.title = norm(t.textContent);
+  const md = doc.querySelector('meta[name="description" i]');
+  if(md) out.description = norm(md.getAttribute('content') || '');
+  const h1s = Array.from(doc.querySelectorAll('h1')).map(h => norm(h.textContent)).filter(Boolean);
+  out.h1 = h1s[0] || '';
+  out.h1Count = h1s.length;
+  const mc = doc.querySelector('link[rel="canonical" i]');
+  if(mc && mc.getAttribute('href')){
+    try{ out.canonical = new URL(mc.getAttribute('href'), pageUrl).href; }catch(e){ out.canonical = mc.getAttribute('href'); }
+  }
+  const sm = doc.querySelector('script[data-drupal-selector="drupal-settings-json"]');
+  if(sm){ try{ const j = JSON.parse(sm.textContent); out.currentPath = (j.path && j.path.currentPath) || ''; }catch(e){} }
+  // эвристика 404 у Drupal: title «не найдена» или каноническая — главная
+  const notFoundTitle = /Страница не найдена|Page not found|Доступ запрещ|Access denied/i.test(out.title);
+  let canonIsHome = false;
+  try{
+    const c = new URL(out.canonical || '', pageUrl);
+    const p = new URL(pageUrl);
+    canonIsHome = !!out.canonical && (c.pathname === '/' || c.pathname === '') && p.pathname !== '/';
+  }catch(e){}
+  out.suspect404 = notFoundTitle || canonIsHome;
+  return out;
+}
+
+/* ================= статусы ================= */
+// статусы полей: match | differ | none | error
+function fieldStatus(row, field){
+  if(!row.live) return 'none';
+  if(row.live.error) return 'error';
+  const liveVal = field === 'h1' ? row.live.h1 : row.live[field];
+  if(!cmpVal(liveVal)) return 'none';
+  return cmpVal(row[field]) === cmpVal(liveVal) ? 'match' : 'differ';
+}
+function draftStatus(row, field){
+  const d = norm(row.draft[field]);
+  if(!d) return 'none';
+  if(!row.live || row.live.error) return 'pending';
+  return cmpVal(d) === cmpVal(row.live[field]) ? 'match' : 'differ';
+}
+function rowState(row){
+  if(!row.live) return 'unchecked';
+  if(row.live.error) return 'error';
+  const st = ['h1','title','description'].map(f => fieldStatus(row, f));
+  if(st.includes('differ')) return 'changed';
+  if(st.every(s => s === 'match')) return 'match';
+  return 'partial';
+}
+const CHIP = {
+  match:  '<span class="chip chip-match">= совпадает</span>',
+  differ: '<span class="chip chip-differ">≠ отличается</span>',
+  none:   '<span class="chip chip-none">— нет данных</span>',
+  error:  '<span class="chip chip-error">× ошибка</span>',
+  warn:   '<span class="chip chip-warn">? 404</span>',
+  pending:'<span class="chip chip-none">… ждёт проверки</span>',
+};
+const MINI = {
+  match:  '<span class="chip chip-match mini" title="совпадает">=</span>',
+  differ: '<span class="chip chip-differ mini" title="отличается">≠</span>',
+  none:   '<span class="chip chip-none mini" title="нет данных">—</span>',
+  error:  '<span class="chip chip-error mini" title="ошибка">×</span>',
+};
+const MINI_TEXT = { match:'совпадает', differ:'отличается', none:'нет данных', error:'ошибка загрузки' };
+function liveCell(row){
+  if(!row.live) return '<span class="chip chip-none">— не проверено</span>';
+  if(row.live.error) return CHIP.error;
+  if(row.live.suspect404) return CHIP.warn;
+  return '<span class="chip chip-match">ok</span>';
+}
+
+/* ================= localStorage ================= */
+function loadPersist(){
+  const drafts = LS.get('dmc_v1_drafts', {});
+  const live = LS.get('dmc_v1_live', {});
+  for(const r of state.rows){
+    if(drafts[r.url]) r.draft = { title: drafts[r.url].title || '', description: drafts[r.url].description || '' };
+    if(live[r.url]) r.live = live[r.url];
+  }
+}
+function saveDraft(row){
+  const d = LS.get('dmc_v1_drafts', {});
+  d[row.url] = row.draft;
+  LS.set('dmc_v1_drafts', d);
+}
+function saveLive(row){
+  const l = LS.get('dmc_v1_live', {});
+  l[row.url] = row.live;
+  LS.set('dmc_v1_live', l);
+}
+
+/* ================= проверка ================= */
+async function checkRow(row){
+  const r = await fetchRaw(row.url);
+  const p = parseLive(r.text, row.url);
+  state.via = r.via;
+  row.live = Object.assign(p, { via: r.via, ts: Date.now(), error: '' });
+  saveLive(row);
+}
+async function checkAll(){
+  if(state.running){ state.abort = true; return; }
+  state.running = true; state.abort = false; state.lastDone = 0;
+  const btn = $('#btnCheck'); btn.textContent = '■&nbsp; Стоп';
+  const todo = filteredRows();
+  await mapPool(todo, 4, async (row) => {
+    if(state.abort) return;
+    try{ await checkRow(row); row._err = ''; }
+    catch(e){ if(!state.abort){ row.live = { error: e.message, via: '', ts: Date.now() }; saveLive(row); } }
+  }, (done, total) => {
+    state.lastDone = done;
+    $('#progress').textContent = 'Проверка: ' + done + '/' + total;
+    if(done % 5 === 0 || done === total) render();
+  });
+  state.running = false;
+  btn.innerHTML = '⟳&nbsp; Проверить актуальные данные';
+  render();
+  const s = counts();
+  $('#progress').textContent = state.abort ? 'Остановлено' : 'Готово: ' + s.match + ' совпало, ' + s.changed + ' отличается, ' + s.error + ' ошибок' + (state.via ? ' · через ' + state.via : '');
+}
+
+/* ================= фильтры ================= */
+function filteredRows(){
+  const q = norm($('#search').value).toLowerCase();
+  const f = $('#statusFilter').value;
+  return state.rows.filter(r => {
+    if(q && !r.url.toLowerCase().includes(q)) return false;
+    const st = rowState(r);
+    switch(f){
+      case 'changed':   return st === 'changed';
+      case 'match':     return st === 'match';
+      case 'error':     return st === 'error';
+      case 'unchecked': return st === 'unchecked';
+      case 'draftdiff': return draftStatus(r,'title') === 'differ' || draftStatus(r,'description') === 'differ';
+      default: return true;
+    }
+  });
+}
+function counts(){
+  const c = { match:0, changed:0, error:0, unchecked:0, partial:0, draft:0 };
+  for(const r of state.rows){
+    c[rowState(r)]++;
+    if(draftStatus(r,'title') !== 'none' || draftStatus(r,'description') !== 'none') c.draft++;
+  }
+  return c;
+}
+
+/* ================= отрисовка ================= */
+function statHtml(){
+  const c = counts();
+  const checked = state.rows.length - c.unchecked;
+  return 'Страниц: <b>' + state.rows.length + '</b>'
+    + ' · проверено: <b>' + checked + '</b>'
+    + ' · ' + MINI.match + ' <b>' + c.match + '</b>'
+    + ' · ' + MINI.differ + ' <b>' + c.changed + '</b>'
+    + ' · ' + MINI.error + ' <b>' + c.error + '</b>'
+    + ' · не проверено: <b>' + c.unchecked + '</b>'
+    + ' · черновики: <b>' + c.draft + '</b>'
+    + (state.lastDone && Object.values(LS.get('dmc_v1_live', {})).some(l => l && l.ts) ? ' · live от ' + fmtTs(Math.max(...state.rows.filter(r=>r.live&&r.live.ts).map(r=>r.live.ts))) : '');
+}
+function summaryCell(row){
+  if(!row.live) return '<span class="chip chip-none mini" title="не проверено">···</span>';
+  if(row.live.error) return CHIP.error;
+  const st = ['h1','title','description'].map(f => fieldStatus(row, f));
+  return ['H1','T','D'].map((n,i) =>
+    '<span title="' + n + ': ' + MINI_TEXT[st[i]] + '">' + MINI[st[i]] + '</span>'
+  ).join(' ');
+}
+function counterHtml(text, lo, hi){
+  const n = norm(text).length;
+  const bad = n > 0 && (n < lo || n > hi);
+  return '<span class="counter">' + n + ' симв.' + (bad ? ' <span class="warnMark" title="вне рекомендуемого диапазона ' + lo + '–' + hi + '">!</span>' : '') + '</span>';
+}
+function detailHtml(row){
+  const h1st = fieldStatus(row,'h1'), tst = fieldStatus(row,'title'), dst = fieldStatus(row,'description');
+  const dt = draftStatus(row,'title'), dd = draftStatus(row,'description');
+  const h1blk =
+    '<div class="blk"><div class="blk-h">H1 ' + (MINI[h1st] || '') + (row.live && row.live.h1Count > 1 ? ' <span class="chip chip-warn">H1 ×' + row.live.h1Count + ' на странице</span>' : '') + '</div>' +
+    '<div class="cols c2">' +
+      '<div class="cellbox"><div class="lbl">в отчёте</div><div class="val">' + (row.h1 ? esc(row.h1) : '<span class="val empty">пусто</span>') + '</div></div>' +
+      '<div class="cellbox"><div class="lbl">на сайте сейчас</div><div class="val">' + (row.live && row.live.h1 ? esc(row.live.h1) : (row.live && row.live.error ? '<span class="val empty">не загружено</span>' : '<span class="val empty">нет данных</span>')) + '</div></div>' +
+    '</div></div>';
+  const metaBlk = (field, label, st, dst2) => {
+    const rep = row[field];
+    const lv = row.live && !row.live.error ? row.live[field] : '';
+    const dv = norm(row.draft[field]);
+    return '<div class="blk"><div class="blk-h">' + label + ' ' + (MINI[st] || '') + '</div>' +
+    '<div class="cols c3">' +
+      '<div class="cellbox"><div class="lbl">в отчёте (' + norm(rep).length + ' симв.)</div><div class="val">' + (rep ? esc(rep) : '<span class="val empty">пусто</span>') + '</div></div>' +
+      '<div class="cellbox"><div class="lbl">на сайте сейчас</div><div class="val">' + (lv ? esc(lv) : '<span class="val empty">нет данных</span>') + '</div></div>' +
+      '<div class="cellbox"><div class="lbl">черновик — правьте здесь</div>' +
+        '<textarea data-draft="' + field + '" data-url="' + esc(row.url) + '" rows="3" placeholder="новый ' + label.toLowerCase() + '…">' + esc(dv) + '</textarea>' +
+        counterHtml(dv, field === 'title' ? 40 : 120, field === 'title' ? 70 : 180) +
+        '<div class="miniBtns">' +
+          '<button class="btn small ghost" data-act="draft-report" data-field="' + field + '" data-url="' + esc(row.url) + '">← из отчёта</button>' +
+          '<button class="btn small ghost" data-act="draft-live" data-field="' + field + '" data-url="' + esc(row.url) + '">← с сайта</button>' +
+        '</div>' +
+        '<div class="draftEq">' + (dst2 === 'none' ? '' : dst2 === 'pending' ? '<span class="chip chip-none">черновик ещё не сверен</span>' : dst2 === 'match' ? '<span class="chip chip-match">черновик = сайт</span>' : '<span class="chip chip-differ">черновик ≠ сайт</span>') + '</div>' +
+      '</div>' +
+    '</div></div>';
+  };
+  const svc =
+    '<div class="svc">' +
+      (row.live && !row.live.error
+        ? '<span>каноническая: <b>' + (row.live.canonical ? esc(row.live.canonical) : '—') + '</b></span>' +
+          (row.live.currentPath ? '<span>Drupal currentPath: <b>' + esc(row.live.currentPath) + '</b></span>' : '') +
+          '<span>проверено: <b>' + fmtTs(row.live.ts) + '</b> через <b>' + esc(row.live.via || '—') + '</b></span>'
+        : '<span>' + (row.live && row.live.error ? 'последняя ошибка: <b>' + esc(row.live.error) + '</b>' : 'страница ещё не проверялась') + '</span>') +
+      '<span style="margin-left:auto"><button class="btn small" data-act="check-row" data-url="' + esc(row.url) + '">⟳ проверить эту страницу</button></span>' +
+    '</div>';
+  return h1blk + metaBlk('title','Title',tst,dt) + metaBlk('description','Description',dst,dd) + svc;
+}
+function render(){
+  const rows = filteredRows();
+  const tbody = $('#tbody');
+  if(!rows.length){ tbody.innerHTML = '<tr><td colspan="10" style="text-align:center;color:var(--faint);padding:30px">ничего не найдено по фильтру</td></tr>'; }
+  else{
+    tbody.innerHTML = rows.map((r) => {
+      const i = state.rows.indexOf(r) + 1;
+      const isOpen = state.open.has(r.url);
+      let html = '<tr class="dataRow' + (isOpen ? ' open' : '') + '" data-url="' + esc(r.url) + '">' +
+        '<td class="num">' + i + '</td>' +
+        '<td class="url"><a href="' + esc(r.url) + '" target="_blank" rel="noopener">' + esc(r.url.replace(/^https?:\/\//,'')) + '</a></td>' +
+        '<td class="c">' + esc(r.code || '—') + '</td>' +
+        '<td class="c">' + esc(r.lang || '—') + '</td>' +
+        '<td class="c">' + esc(r.dupTitle || '0') + '</td>' +
+        '<td class="c">' + esc(r.dupDescription || '0') + '</td>' +
+        '<td class="c">' + esc(r.textLength || '—') + '</td>' +
+        '<td style="border-left:2px solid var(--ink)">' + liveCell(r) + '</td>' +
+        '<td class="summary">' + summaryCell(r) + '</td>' +
+        '<td class="toggle">' + (isOpen ? '▾' : '▸') + '</td>' +
+      '</tr>';
+      if(isOpen) html += '<tr class="detailRow"><td colspan="10">' + detailHtml(r) + '</td></tr>';
+      return html;
+    }).join('');
+  }
+  $('#stats').innerHTML = statHtml();
+  $('#dataCaption').textContent = dataCaption();
+}
+function dataCaption(){
+  const hosts = new Set(state.rows.map(r => { try{ return new URL(r.url).hostname; }catch(e){ return '?'; } }));
+  return [...hosts].join(', ') + ', ' + state.rows.length + ' страниц';
+}
+
+/* ================= CSV ================= */
+function csvEsc(v){ v = String(v ?? ''); return '"' + v.replace(/"/g,'""') + '"'; }
+function exportCsv(){
+  const head = ['n','url','code','lang','h1_report','title_report','description_report','dup_title','dup_description','text_length',
+    'live_status','live_h1','live_title','live_description','h1_match','title_match','desc_match',
+    'draft_title','draft_description','draft_vs_live','checked_at'];
+  const lines = [head.join(',')];
+  state.rows.forEach((r, i) => {
+    const st = f => { const s = fieldStatus(r,f); return s === 'match' ? '=' : s === 'differ' ? '<>' : s === 'error' ? 'error' : ''; };
+    const ds = f => { const s = draftStatus(r,f); return s === 'match' ? '=' : s === 'differ' ? '<>' : ''; };
+    const live = rowState(r);
+    lines.push([
+      i+1, r.url, r.code, r.lang, r.h1, r.title, r.description, r.dupTitle, r.dupDescription, r.textLength,
+      live === 'unchecked' ? 'unchecked' : live === 'error' ? 'error' : r.live.suspect404 ? 'suspect404' : 'ok',
+      r.live ? r.live.h1 : '', r.live ? r.live.title : '', r.live ? r.live.description : '',
+      st('h1'), st('title'), st('description'),
+      r.draft.title, r.draft.description,
+      (ds('title') || ds('description')) ? (ds('title') + '/' + ds('description')) : '',
+      r.live && r.live.ts ? new Date(r.live.ts).toISOString() : '',
+    ].map(csvEsc).join(','));
+  });
+  const blob = new Blob(['\uFEFF' + lines.join('\r\n')], {type:'text/csv;charset=utf-8'});
+  const a = document.createElement('a');
+  a.href = URL.createObjectURL(blob);
+  a.download = 'meta-check-' + new Date().toISOString().slice(0,10) + '.csv';
+  a.click();
+  setTimeout(() => URL.revokeObjectURL(a.href), 5000);
+}
+
+/* ================= импорт данных отчёта ================= */
+function pick(o, keys){
+  for(const k of keys){ if(o[k] !== undefined && o[k] !== null) return o[k]; }
+  return undefined;
+}
+function normalizeData(arr){
+  return arr.filter(o => o && typeof o === 'object').map(o => ({
+    code: String(pick(o, ['code','код','Код ответа']) ?? ''),
+    url: String(pick(o, ['url','URL','адрес']) ?? '').trim(),
+    lang: String(pick(o, ['lang','язык']) ?? ''),
+    h1: String(pick(o, ['h1','H1']) ?? ''),
+    title: String(pick(o, ['title','Title']) ?? ''),
+    description: String(pick(o, ['description','Description']) ?? ''),
+    dupTitle: String(pick(o, ['dupTitle','Дубли Title']) ?? '0'),
+    dupDescription: String(pick(o, ['dupDescription','Дубли Description']) ?? '0'),
+    textLength: String(pick(o, ['textLength','Длина текста']) ?? ''),
+    draft: { title:'', description:'' },
+    live: null,
+  })).filter(r => r.url);
+}
+function applyData(rows, note){
+  state.rows = rows;
+  state.open = new Set();
+  loadPersist();
+  render();
+  if(note) $('#importInfo').textContent = note;
+}
+
+/* ================= события ================= */
+$('#btnCheck').addEventListener('click', checkAll);
+$('#btnCsv').addEventListener('click', exportCsv);
+$('#btnClearLive').addEventListener('click', () => {
+  if(!confirm('Удалить все живые результаты проверки из этого браузера?')) return;
+  LS.del('dmc_v1_live');
+  for(const r of state.rows) r.live = null;
+  state.lastDone = 0;
+  render();
+});
+$('#btnClearDrafts').addEventListener('click', () => {
+  if(!confirm('Удалить все черновики title/description из этого браузера?')) return;
+  LS.del('dmc_v1_drafts');
+  for(const r of state.rows) r.draft = { title:'', description:'' };
+  render();
+});
+$('#search').addEventListener('input', render);
+$('#statusFilter').addEventListener('change', render);
+$('#softCmp').addEventListener('change', () => { state.soft = $('#softCmp').checked; LS.set('dmc_v1_soft', state.soft); render(); });
+$('#btnImport').addEventListener('click', () => {
+  let arr;
+  try{ arr = JSON.parse($('#importArea').value); }
+  catch(e){ $('#importInfo').textContent = 'Ошибка JSON: ' + e.message; return; }
+  if(!Array.isArray(arr)){ $('#importInfo').textContent = 'Нужен JSON-массив страниц'; return; }
+  const rows = normalizeData(arr);
+  if(!rows.length){ $('#importInfo').textContent = 'В массиве нет страниц с полем url'; return; }
+  LS.set('dmc_v1_data', rows);
+  LS.del('dmc_v1_live');
+  applyData(rows, 'Заменено: ' + rows.length + ' страниц (сохранено в этом браузере)');
+});
+$('#btnResetData').addEventListener('click', () => {
+  LS.del('dmc_v1_data'); LS.del('dmc_v1_live');
+  applyData(normalizeData(BUILTIN), 'Возвращены встроенные данные');
+});
+
+const tbody = $('#tbody');
+tbody.addEventListener('click', (e) => {
+  const act = e.target.closest('[data-act]');
+  if(act){
+    e.stopPropagation();
+    const url = act.dataset.url;
+    const row = state.rows.find(r => r.url === url);
+    if(!row) return;
+    if(act.dataset.act === 'check-row'){
+      act.disabled = true; act.textContent = '… проверяем';
+      checkRow(row).then(() => render()).catch(err => { row.live = { error: err.message, via:'', ts: Date.now() }; saveLive(row); render(); });
+    }else if(act.dataset.act === 'draft-report'){
+      row.draft[act.dataset.field] = row[act.dataset.field]; saveDraft(row); render();
+    }else if(act.dataset.act === 'draft-live'){
+      row.draft[act.dataset.field] = row.live && !row.live.error ? (row.live[act.dataset.field] || '') : ''; saveDraft(row); render();
+    }
+    return;
+  }
+  if(e.target.closest('a,button,input,textarea,select,label')) return;
+  const tr = e.target.closest('tr.dataRow');
+  if(!tr) return;
+  const url = tr.dataset.url;
+  if(state.open.has(url)) state.open.delete(url); else state.open.add(url);
+  render();
+});
+tbody.addEventListener('input', (e) => {
+  const ta = e.target.closest('textarea[data-draft]');
+  if(!ta) return;
+  const row = state.rows.find(r => r.url === ta.dataset.url);
+  if(!row) return;
+  row.draft[ta.dataset.draft] = ta.value;
+  saveDraft(row);
+  // обновить только счётчик и статус черновика, не перерисовывая ввод
+  const box = ta.closest('.cellbox');
+  const cnt = box.querySelector('.counter');
+  const range = ta.dataset.draft === 'title' ? [40,70] : [120,180];
+  const n = norm(ta.value).length;
+  const bad = n > 0 && (n < range[0] || n > range[1]);
+  if(cnt) cnt.innerHTML = n + ' симв.' + (bad ? ' <span class="warnMark" title="вне рекомендуемого диапазона ' + range[0] + '–' + range[1] + '">!</span>' : '');
+  const eq = box.querySelector('.draftEq');
+  if(eq){
+    const ds = draftStatus(row, ta.dataset.draft);
+    eq.innerHTML = ds === 'none' ? '' : ds === 'pending' ? '<span class="chip chip-none">черновик ещё не сверен</span>' : ds === 'match' ? '<span class="chip chip-match">черновик = сайт</span>' : '<span class="chip chip-differ">черновик ≠ сайт</span>';
+  }
+});
+
+/* ================= старт ================= */
+$('#softCmp').checked = state.soft;
+const stored = LS.get('dmc_v1_data', null);
+applyData(Array.isArray(stored) && stored.length ? stored : normalizeData(BUILTIN));
+</script>
+</body>
+</html>
